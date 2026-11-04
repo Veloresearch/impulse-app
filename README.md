@@ -8,7 +8,7 @@
 <h3 align="center">Your own AI, in your pocket.</h3>
 
 <p align="center">
-  The models run on your computer, in <a href="https://github.com/Veloresearch/velocity-local-services">Impulse</a>.<br>
+  The models run on your computer, in <a href="https://github.com/Veloresearch/impulse">Impulse</a>.<br>
   This app puts them in your hand: chat, search the web, read your files, talk, from anywhere.
 </p>
 
@@ -32,7 +32,7 @@
 <p align="center">
   <a href="https://github.com/Veloresearch/impulse-app/releases">Release notes</a> ·
   <a href="https://veloresearch.com">veloresearch.com</a> ·
-  <a href="https://github.com/Veloresearch/velocity-local-services">Impulse for your computer</a>
+  <a href="https://github.com/Veloresearch/impulse">Impulse for your computer</a>
 </p>
 
 <!-- SCREENS -->
@@ -49,7 +49,7 @@
 
 ## Get started
 
-1. **Install Impulse on your computer** from [its releases](https://github.com/Veloresearch/velocity-local-services/releases/latest). It is where the models run.
+1. **Install Impulse on your computer** from [its releases](https://github.com/Veloresearch/impulse/releases/latest). It is where the models run.
 2. **Install this app.** Download the APK for your phone from the buttons above (ARM64 fits almost every phone from the last eight years) and open it. Android asks once to allow installs from your browser or file manager.
 3. **Connect.** Open the app: computers running Impulse on the same Wi-Fi show up on their own. Tap yours, or scan the code from **Impulse › Settings › Phone**.
 4. **Sign in** with your Impulse profile's password. That's it.

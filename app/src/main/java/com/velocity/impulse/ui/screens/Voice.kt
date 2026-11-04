@@ -827,7 +827,7 @@ private fun MuteButton(muted: Boolean, k: () -> Float, haze: HazeState, onClick:
 
 private fun farthest(c: Offset, s: Size) = hypot(max(c.x, s.width - c.x), max(c.y, s.height - c.y))
 
-/** A sphere whose edge breathes: three slow waves around the rim, as tall as [wob]. */
+/** A sphere whose edge breathes: three slow ripples around the rim, as tall as [wob]. */
 private fun blob(path: Path, c: Offset, r: Float, wob: Float, time: Float) {
     path.reset()
     val n = 72
