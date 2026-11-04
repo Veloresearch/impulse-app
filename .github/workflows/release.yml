@@ -20,7 +20,7 @@ jobs:
 
       - name: Tag matches the app version
         run: |
-          app=$(sed -n 's/^val appVersion = "\(.*\)"$//p' app/build.gradle.kts)
+          app=$(sed -n -E 's/^val appVersion = "(.*)"$/\1/p' app/build.gradle.kts)
           [ "v$app" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME does not match appVersion $app in app/build.gradle.kts"; exit 1; }
 
       - name: Signing key
