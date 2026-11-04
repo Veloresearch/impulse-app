@@ -40,7 +40,7 @@ object Chrome {
 @OptIn(ExperimentalTransitionApi::class)
 @Stable
 class Shell(val m: AppModel, private val scope: CoroutineScope) {
-    /** 0 closed, 1 open; a drag rubber-bands to 1.04. */
+    /** 1 the chats on the left are open, -1 the details on the right, 0 neither; drags rubber-band past. */
     val drawer = Animatable(0f)
     var drawerWidth by mutableStateOf(300.dp)
         internal set
@@ -83,9 +83,13 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
         scope.launch { drawer.animateTo(1f, Motion.drawer()) }
     }
 
+    fun openDetails() {
+        if (m.current != null) scope.launch { drawer.animateTo(-1f, Motion.drawer()) }
+    }
+
     fun closeDrawer() {
-        if (docked) return
-        scope.launch { drawer.animateTo(0f, Motion.drawer()) }
+        if (docked && drawer.value > 0f) return
+        scope.launch { drawer.animateTo(if (docked) 1f else 0f, Motion.drawer()) }
     }
 
     fun openChat(id: String, title: String, from: Rect? = null) {

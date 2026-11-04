@@ -28,6 +28,9 @@ class Chat(val raw: JSONObject) {
     val updatedAt: Long get() = raw.optLong("updatedAt")
     val pinned: Boolean get() = raw.optBoolean("pinned")
     val contextName: String? get() = raw.optString("contextName").ifBlank { null }.takeIf { it != "null" }
+
+    /** The personality this chat answers in; none unless chosen in its details. */
+    val persona: String? get() = raw.optString("persona").ifBlank { null }.takeIf { it != "null" }
     val messages: List<Message> get() = raw.optJSONArray("messages").objects().map(::Message)
 
     fun edit(block: JSONObject.() -> Unit): Chat = Chat(JSONObject(raw.toString()).apply(block).put("updatedAt", System.currentTimeMillis()))

@@ -1,5 +1,6 @@
 package com.velocity.impulse.ui
 
+import com.velocity.impulse.ui.screens.Details
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
@@ -207,8 +208,15 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
                     scope.launch {
                         val old = drawer.value
                         val x = old + d / wPx
-                        drawer.snapTo(if (x > 1f) 1f + rubber(x - 1f, 0.04f) else x.coerceAtLeast(0f))
-                        if ((old - 0.5f) * (drawer.value - 0.5f) < 0f) view.feel(Feel.Tick)
+                        val low = if (m.current != null) -1f else 0f
+                        drawer.snapTo(
+                            when {
+                                x > 1f -> 1f + rubber(x - 1f, 0.04f)
+                                x < low -> low - rubber(low - x, 0.04f)
+                                else -> x
+                            },
+                        )
+                        if ((old - 0.5f) * (drawer.value - 0.5f) < 0f || (old + 0.5f) * (drawer.value + 0.5f) < 0f) view.feel(Feel.Tick)
                     }
                 },
                 Orientation.Horizontal,
@@ -217,8 +225,16 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
                 onDragStarted = { keyboard?.hide() },
                 onDragStopped = { v ->
                     val vp = v / wPx
-                    val open = if (abs(vp) > 1.4f) vp > 0f else drawer.value > 0.5f
-                    drawer.animateTo(if (open) 1f else 0f, Motion.drawer(), initialVelocity = vp)
+                    val at = drawer.value
+                    val low = if (m.current != null) -1f else 0f
+                    val target = when {
+                        abs(vp) > 1.4f && vp > 0f -> if (at < 0f) 0f else 1f
+                        abs(vp) > 1.4f -> if (at > 0f) 0f else low
+                        at > 0.5f -> 1f
+                        at < -0.5f -> low
+                        else -> 0f
+                    }
+                    drawer.animateTo(target, Motion.drawer(), initialVelocity = vp)
                 },
             ),
     ) {
@@ -239,26 +255,45 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
                 }
                 .then(if (calm) Modifier.background(Tone.Void) else Modifier),
         )
+        Details(
+            m,
+            Modifier.align(Alignment.CenterEnd)
+                .zIndex(if (calm && drawer.value < 0f) 1f else 0f)
+                .width(shell.drawerWidth)
+                .fillMaxHeight()
+                .graphicsLayer {
+                    val k = (-drawer.value).coerceIn(0f, 1f)
+                    alpha = k
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    if (calm) return@graphicsLayer
+                    translationX = (1f - k) * 0.28f * size.width
+                    scaleX = 0.96f + 0.04f * k
+                    scaleY = scaleX
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                }
+                .then(if (calm) Modifier.background(Tone.Void) else Modifier),
+        )
         Card(
             m, shell,
             Modifier.fillMaxSize()
                 .graphicsLayer {
-                    val p = drawer.value.coerceAtLeast(0f)
+                    val p = drawer.value
                     if (p == 0f || calm) return@graphicsLayer
-                    val k = p.coerceAtMost(1f)
+                    val side = if (p > 0f) 1f else -1f
+                    val k = abs(p).coerceAtMost(1f)
                     val s = 1f - 0.08f * k
-                    transformOrigin = TransformOrigin(1f, 0.5f)
+                    transformOrigin = TransformOrigin(if (p > 0f) 1f else 0f, 0.5f)
                     scaleX = s
                     scaleY = s
-                    translationX = p * (wPx + 12.dp.toPx()) - (1f - s) * size.width
-                    rotationY = -7f * k
+                    translationX = p * (wPx + 12.dp.toPx()) - side * (1f - s) * size.width
+                    rotationY = -7f * k * side
                     cameraDistance = 18f * density
                     shape = Shapes.Sheet
                     clip = true
                 }
                 .drawWithContent {
                     drawContent()
-                    val p = drawer.value.coerceIn(0f, 1f)
+                    val p = abs(drawer.value).coerceAtMost(1f)
                     if (p > 0f) drawRect(Color.Black, alpha = 0.35f * p)
                 }
                 .background(Tone.App),
@@ -268,7 +303,7 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
 
 @Composable
 private fun Card(m: AppModel, shell: Shell, modifier: Modifier) {
-    val open by remember { derivedStateOf { shell.drawer.targetValue >= 1f } }
+    val open by remember { derivedStateOf { shell.drawer.targetValue >= 1f || shell.drawer.targetValue <= -1f } }
     Box(modifier.onPlaced { shell.flight.card = it }) {
         Conversation(m, Modifier.fillMaxSize())
         TopIsland(m, Modifier.align(Alignment.TopCenter))
@@ -340,15 +375,16 @@ private fun PageHost(surface: Surface, content: @Composable (AnimatedVisibilityS
 private fun Backs(shell: Shell) {
     val scope = rememberCoroutineScope()
     val drawer = shell.drawer
-    val open by remember { derivedStateOf { drawer.targetValue >= 1f } }
+    val open by remember { derivedStateOf { drawer.targetValue >= 1f || drawer.targetValue <= -1f } }
     val bare = shell.pages.currentState == null && shell.sheets.currentState == null
 
-    PredictiveBackHandler(open && !shell.docked && bare) { progress ->
+    PredictiveBackHandler(open && bare && !(shell.docked && drawer.targetValue > 0f)) { progress ->
+        val from = drawer.targetValue
         try {
-            progress.collect { e -> if (!shell.calm) drawer.snapTo(1f - e.progress) }
-            scope.launch { drawer.animateTo(0f, Motion.drawer()) }
+            progress.collect { e -> if (!shell.calm) drawer.snapTo(from * (1f - e.progress)) }
+            scope.launch { drawer.animateTo(if (shell.docked) 1f else 0f, Motion.drawer()) }
         } catch (e: CancellationException) {
-            scope.launch { drawer.animateTo(1f, Motion.drawer()) }
+            scope.launch { drawer.animateTo(from, Motion.drawer()) }
             throw e
         }
     }

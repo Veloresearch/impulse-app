@@ -1,5 +1,6 @@
 package com.velocity.impulse.ui.screens
 
+import com.velocity.impulse.ui.components.ModelFace
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -111,7 +112,7 @@ private val PillShape = Squircle(Radius.Card)
 private fun same(a: String?, b: String?) =
     a != null && b != null && a.replace('\\', '/').equals(b.replace('\\', '/'), ignoreCase = true)
 
-/** Menu, the chat and its model, new chat: three islands that stay put while their text rolls. */
+/** Menu, the chat and its model, the chat's details: three islands that stay put while their text rolls. */
 @Composable
 fun TopIsland(m: AppModel, modifier: Modifier = Modifier) {
     val shell = LocalShell.current
@@ -125,7 +126,7 @@ fun TopIsland(m: AppModel, modifier: Modifier = Modifier) {
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Pill(m, shell) }
         Spacer(Modifier.width(8.dp))
-        NewChat(m, shell)
+        DetailsButton(m, shell)
     }
 }
 
@@ -177,11 +178,6 @@ private fun Pill(m: AppModel, shell: Shell) {
                 }
                 .pressable({ shell.open(Surface.Model, "pill") }, depth = 0.95f, stretch = true, feelOnDown = true)
                 .glass(shell.cardHaze, PillShape)
-                .drawWithContent {
-                    drawContent()
-                    val p = pulse.value.coerceIn(0f, 1f)
-                    if (p > 0f) drawRect(Color.White, alpha = 0.06f * p)
-                }
                 .widthIn(min = 160.dp)
                 .height(52.dp)
                 .padding(horizontal = 14.dp),
@@ -194,7 +190,7 @@ private fun Pill(m: AppModel, shell: Shell) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AnimatedContent(
                     kind,
-                    Modifier.size(12.dp),
+                    Modifier.size(18.dp),
                     transitionSpec = {
                         val enter = if (targetState == Kind.Ready && !calm) scaleIn(spring(0.5f, 500f), 0f) else fadeIn(tween(Motion.M2))
                         val exit = if (initialState == Kind.Ready && !calm) scaleOut(tween(Motion.M2, easing = Motion.Out), 0f) else fadeOut(tween(Motion.M2))
@@ -204,10 +200,10 @@ private fun Pill(m: AppModel, shell: Shell) {
                     label = "mark",
                 ) { k ->
                     when (k) {
-                        Kind.Ready -> Box(Modifier.size(7.dp).background(accent, CircleShape))
-                        Kind.Loading -> Spinner(accent, 12.dp)
-                        Kind.None -> Box(Modifier.size(7.dp).background(Ink.Four, CircleShape))
-                        Kind.Offline -> Icon(Glyph.Alert, Signal.Warn, size = 12.dp)
+                        Kind.Ready -> ModelFace(m, m.status?.model?.name.orEmpty(), m.status?.model?.family.orEmpty(), 18.dp)
+                        Kind.Loading -> Spinner(accent, 14.dp)
+                        Kind.None -> Icon(Glyph.Models, Ink.Three, size = 14.dp)
+                        Kind.Offline -> Icon(Glyph.Alert, Signal.Warn, size = 14.dp)
                     }
                 }
                 Spacer(Modifier.width(6.dp))
@@ -219,12 +215,11 @@ private fun Pill(m: AppModel, shell: Shell) {
     }
 }
 
+/** Opens the chat's details on the right, the mirror of the menu on the left. */
 @Composable
-private fun NewChat(m: AppModel, shell: Shell) {
+private fun DetailsButton(m: AppModel, shell: Shell) {
     val empty = m.current == null
-    val v by animateFloatAsState(if (empty) 0f else 1f, spring(0.8f, 500f), label = "new")
-    val turn = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
+    val v by animateFloatAsState(if (empty) 0f else 1f, spring(0.8f, 500f), label = "details")
     Box(
         Modifier.size(44.dp)
             .graphicsLayer {
@@ -236,20 +231,9 @@ private fun NewChat(m: AppModel, shell: Shell) {
             .glass(shell.cardHaze, CircleShape),
     ) {
         IconBtn(
-            Glyph.Plus,
-            {
-                if (!shell.calm) scope.launch {
-                    turn.animateTo(90f, spring(0.6f, 500f))
-                    turn.snapTo(0f)
-                }
-                shell.newChat()
-            },
-            Modifier.graphicsLayer { rotationZ = turn.value },
-            tint = Ink.One,
-            fill = Color.Transparent,
-            size = 44.dp,
-            enabled = !empty,
-            island = true,
+            Glyph.Sidebar, shell::openDetails,
+            Modifier.graphicsLayer { rotationY = 180f },
+            tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !empty, island = true,
         )
     }
 }
@@ -451,7 +435,7 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
         ) {
             Box(Modifier.size(36.dp).background(Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) {
                 if (phase == Phase.Loading || phase == Phase.Landed) LoadMark(accent, { ring.value }, { fill.value }, { tick.value })
-                else Icon(Glyph.Models, Ink.Three, size = 18.dp)
+                else ModelFace(m, p.name, p.family, 36.dp)
             }
             Spacer(Modifier.width(Space.S3))
             Column(Modifier.weight(1f)) {

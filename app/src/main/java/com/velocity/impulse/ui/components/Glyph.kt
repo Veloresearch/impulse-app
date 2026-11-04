@@ -55,6 +55,10 @@ enum class Glyph(private val regular: Int, private val bold: Int, private val fi
     Shield(R.drawable.ph_shield_check_regular, R.drawable.ph_shield_check_bold, R.drawable.ph_shield_check_fill, Weight.Fill),
     Eye(R.drawable.ph_eye_regular, R.drawable.ph_eye_bold, R.drawable.ph_eye_fill, Weight.Fill),
     EyeOff(R.drawable.ph_eye_slash_regular, R.drawable.ph_eye_slash_bold, R.drawable.ph_eye_slash_fill, Weight.Fill),
+    Camera(R.drawable.ph_camera_regular, R.drawable.ph_camera_bold, R.drawable.ph_camera_fill, Weight.Fill),
+    File(R.drawable.ph_file_regular, R.drawable.ph_file_bold, R.drawable.ph_file_fill, Weight.Fill),
+    Image(R.drawable.ph_image_square_regular, R.drawable.ph_image_square_bold, R.drawable.ph_image_square_fill, Weight.Fill),
+    History(R.drawable.ph_clock_counter_clockwise_regular, R.drawable.ph_clock_counter_clockwise_bold, R.drawable.ph_clock_counter_clockwise_fill, Weight.Bold),
     Users(R.drawable.ph_users_regular, R.drawable.ph_users_bold, R.drawable.ph_users_fill, Weight.Fill);
 
     fun res(w: Weight = weight) = when (w) {

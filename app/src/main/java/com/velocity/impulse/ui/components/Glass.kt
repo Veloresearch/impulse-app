@@ -4,9 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
@@ -24,19 +22,13 @@ fun Modifier.glassSource(state: HazeState): Modifier = if (Build.VERSION.SDK_INT
 
 /**
  * Light, matte frosted glass for floating islands: the content under it blurred with a faint
- * tint and a soft highlight along the top edge. Below Android 12 it is a near-solid tone.
+ * tint, no sheen. Below Android 12 it is a near-solid tone.
  * [state] must come from a [glassSource] that is a sibling, never an ancestor.
  */
 fun Modifier.glass(state: HazeState, shape: Shape, shadow: Boolean = true): Modifier {
     var m = this
-    if (shadow) m = m.shadow(8.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.35f))
+    if (shadow) m = m.shadow(6.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.28f))
     m = m.clip(shape)
     m = if (Build.VERSION.SDK_INT >= 31) m.hazeChild(state, Frost) else m.background(Tone.Float.copy(alpha = 0.94f))
-    return m.drawWithCache {
-        val sheen = Brush.verticalGradient(0f to Color.White.copy(alpha = 0.06f), 1f to Color.Transparent, endY = 16.dp.toPx())
-        onDrawWithContent {
-            drawContent()
-            drawRect(sheen)
-        }
-    }
+    return m
 }

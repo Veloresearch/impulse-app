@@ -22,9 +22,9 @@ data class Profile(val id: String, val name: String, val avatar: String?, val ph
 data class Context(val name: String, val tokens: Long?, val documents: Int)
 
 /** A model file in the library, as `/api/v2/models` describes it. */
-data class Probe(val name: String, val path: String, val format: String, val params: Long, val bytes: Long, val trainContext: Int)
+data class Probe(val name: String, val path: String, val format: String, val params: Long, val bytes: Long, val trainContext: Int, val family: String = "")
 
-data class Loaded(val id: String, val name: String, val path: String, val context: Int, val thinks: Boolean)
+data class Loaded(val id: String, val name: String, val path: String, val context: Int, val thinks: Boolean, val family: String = "", val vision: Boolean = false)
 
 data class Status(val model: Loaded?, val busy: Boolean)
 
@@ -114,7 +114,10 @@ class Impulse(private val server: Server, private val token: String? = null) {
         return Status(
             m?.let {
                 val probe = it.optJSONObject("probe")
-                Loaded(it.optString("id"), probe?.optString("name")?.ifBlank { null } ?: it.optString("id"), probe?.optString("path").orEmpty(), it.optInt("context"), it.optBoolean("thinking_template"))
+                Loaded(
+                    it.optString("id"), probe?.optString("name")?.ifBlank { null } ?: it.optString("id"), probe?.optString("path").orEmpty(),
+                    it.optInt("context"), it.optBoolean("thinking_template"), probe?.optString("family").orEmpty(), it.optBoolean("vision"),
+                )
             },
             s.optBoolean("busy"),
         )
@@ -122,7 +125,7 @@ class Impulse(private val server: Server, private val token: String? = null) {
 
     suspend fun library(): List<Probe> = call("/api/v2/models").optJSONArray("models").objects()
         .filter { it.optString("format") == "gguf" || it.optString("format") == "mfy" }
-        .map { Probe(it.optString("name"), it.optString("path"), it.optString("format"), it.optLong("params"), it.optLong("file_bytes"), it.optInt("train_context")) }
+        .map { Probe(it.optString("name"), it.optString("path"), it.optString("format"), it.optLong("params"), it.optLong("file_bytes"), it.optInt("train_context"), it.optString("family")) }
         .sortedBy { it.name.lowercase() }
 
     /** Loads a model the way the panel's picker does: its trained window, capped at 8K. */
@@ -130,6 +133,10 @@ class Impulse(private val server: Server, private val token: String? = null) {
         val context = if (p.format == "mfy") 33_554_432 else minOf(p.trainContext.takeIf { it > 0 } ?: 8192, 8192)
         call("/api/v2/load", JSONObject().put("path", p.path).put("context", context).put("gpu_layers", JSONObject.NULL), slow)
     }
+
+    /** A publisher's picture from Hugging Face, kept by the service, as a data: URL. */
+    suspend fun hubAvatar(author: String): String? =
+        call("/api/v2/hub/avatar", JSONObject().put("author", author)).optString("avatar").takeIf { it.startsWith("data:image/") }
 
     suspend fun unload() {
         call("/api/v2/unload", JSONObject())
@@ -151,11 +158,12 @@ class Impulse(private val server: Server, private val token: String? = null) {
      * at the end. [actor] is the chat's id, so each chat keeps its own memory; [store] answers from
      * a named context. Cancelling the collector cancels the request.
      */
-    fun turn(messages: List<Pair<String, String>>, actor: String, store: String?, effort: String?): Flow<Delta> = callbackFlow {
+    fun turn(messages: List<Pair<String, String>>, actor: String, store: String?, effort: String?, images: List<String> = emptyList()): Flow<Delta> = callbackFlow {
         val body = JSONObject()
             .put("messages", JSONArray(messages.map { (role, content) -> JSONObject().put("role", role).put("content", content) }))
             .put("actor", actor)
         if (store != null) body.put("store", store)
+        if (images.isNotEmpty()) body.put("images", JSONArray(images))
         when (effort) {
             null -> {}
             "off" -> body.put("thinking", false)

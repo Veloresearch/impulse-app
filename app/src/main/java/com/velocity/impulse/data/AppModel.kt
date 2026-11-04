@@ -3,6 +3,7 @@ package com.velocity.impulse.data
 import android.app.Application
 import android.content.Context.MODE_PRIVATE
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -201,7 +202,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         if (stage != Stage.Ready) return@launch
         refreshStatus()
         runCatching { library = api().library() }
-        runCatching { contexts = api().contexts() }
+        // Chat memories (chat-…) and the title helper are the service's own; the panel hides them too.
+        runCatching { contexts = api().contexts().filterNot { it.name.startsWith("chat-") || it.name == "vls-titles" } }
         runCatching { readPrefs(api().prefs()) }
         runCatching { api().me()?.let { remember(it) } }
     }
@@ -312,6 +314,15 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Publisher pictures by Hugging Face owner; an owner is asked for once per run. */
+    val publishers = mutableStateMapOf<String, String?>()
+
+    fun publisher(org: String) {
+        if (org in publishers || stage != Stage.Ready) return
+        publishers[org] = null
+        viewModelScope.launch { runCatching { api().hubAvatar(org) }.getOrNull()?.let { publishers[org] = it } }
+    }
+
     fun unload() = viewModelScope.launch {
         runCatching { api().unload() }
         refreshStatus()
@@ -365,20 +376,33 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         pushSoon()
     }
 
+    fun setPersona(id: String?) {
+        chat?.let { changed(it.edit { put("persona", id ?: JSONObject.NULL) }) }
+        pushSoon()
+    }
+
     fun pin(id: String) {
         chats.firstOrNull { it.id == id }?.let { c -> changed(c.edit { put("pinned", !c.pinned) }) }
         pushSoon()
     }
 
-    fun send(text: String) {
+    /**
+     * Sends a question with what was attached to it. Pictures go to the model to look at; a text
+     * file goes into the question itself. The message keeps the panel's `files` record of each.
+     */
+    fun send(text: String, attached: List<Attachment> = emptyList()) {
         val prompt = text.trim()
-        if (prompt.isEmpty() || streaming) return
-        val base = chat ?: Chat.start(prompt, status?.model?.name, defaultContext).also { current = it.id }
-        val asked = base.messages.filter { it.error == null && it.text.isNotBlank() } + Message.of("user", prompt)
+        if ((prompt.isEmpty() && attached.isEmpty()) || streaming) return
+        val title = prompt.ifEmpty { attached.first().name }
+        val base = chat ?: Chat.start(title, status?.model?.name, defaultContext).also { current = it.id }
+        val question = Message.of("user", prompt)
+        if (attached.isNotEmpty()) question.raw.put("files", org.json.JSONArray(attached.map { it.record() }))
+        val asked = base.messages.filter { it.error == null && it.text.isNotBlank() } + question
         val reply = Message.of("assistant", "")
         reply.raw.put("streaming", true)
         changed(base.withMessages(asked + reply))
-        stream(base.id, reply.id, asked, base.contextName)
+        val docs = attached.filter { it.text != null }.joinToString("") { "\n\n${it.name}:\n```\n${it.text}\n```" }
+        stream(base.id, reply.id, asked, base.contextName, prompt + docs, attached.mapNotNull { it.image }, base.persona)
     }
 
     /** Asks again for the last answer. */
@@ -391,16 +415,26 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         val asked = msgs.take(cut + 1)
         val reply = Message.of("assistant", "").also { it.raw.put("streaming", true) }
         changed(c.withMessages(asked + reply))
-        stream(c.id, reply.id, asked, c.contextName)
+        stream(c.id, reply.id, asked, c.contextName, persona = c.persona)
     }
 
-    private fun stream(chatId: String, replyId: String, asked: List<Message>, store: String?) {
+    private fun stream(
+        chatId: String,
+        replyId: String,
+        asked: List<Message>,
+        store: String?,
+        lastText: String? = null,
+        images: List<String> = emptyList(),
+        persona: String? = null,
+    ) {
         live = Live(chatId, replyId)
         answer = viewModelScope.launch {
             var receipt: JSONObject? = null
             var failed: String? = null
             try {
-                api().turn(asked.map { it.role to it.text }, chatId, store, effort).collect { d ->
+                val voice = Personas.firstOrNull { it.id == persona }?.let { listOf("system" to it.prompt) }.orEmpty()
+                val talk = voice + asked.map { it.role to it.text }.let { t -> if (lastText != null) t.dropLast(1) + ("user" to lastText) else t }
+                api().turn(talk, "chat:$chatId", store, effort, images).collect { d ->
                     val l = live ?: return@collect
                     val now = System.currentTimeMillis()
                     live = when (d) {

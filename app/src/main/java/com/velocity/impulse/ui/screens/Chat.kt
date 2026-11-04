@@ -1,5 +1,18 @@
 package com.velocity.impulse.ui.screens
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import com.velocity.impulse.ui.theme.Space
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.velocity.impulse.data.Attachment
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.mutableStateListOf
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
@@ -361,8 +374,10 @@ private fun Messages(
 @Composable
 private fun UserBubble(msg: Message, toast: Toast) {
     val clip = LocalClipboardManager.current
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-        BasicText(
+    val files = remember(msg) { msg.raw.optJSONArray("files").let { a -> if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) } } }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        if (files.isNotEmpty()) SentFiles(files)
+        if (msg.text.isNotBlank()) BasicText(
             msg.text,
             Modifier.widthIn(max = 300.dp)
                 .pressable(
@@ -530,48 +545,33 @@ private fun Thinking(thought: () -> String, active: Boolean, since: Long, tookMs
             delay(1000 - gone % 1000)
         }
     }
-    val meta = Type.Meta.copy(fontWeight = FontWeight.Medium)
     val done = if (tookMs > 0) {
         val n = max(1L, (tookMs + 500) / 1000)
-        tr("Thought for $n s", "Myślenie: $n s")
+        tr("Thought for $n s", "Myślał przez $n s")
     } else {
         tr("Thought it through", "Przemyślane")
     }
 
-    Column(Modifier.fillMaxWidth().background(Tone.Panel, Shapes.Tile)) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth()
-                .pressable({ if (!active) open = !open }, Shapes.Tile, Tone.Panel, Tone.Raise, depth = 1f, feel = if (active) null else Feel.Tick)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.pressable({ if (!active) open = !open }, depth = 0.98f, feel = if (active) null else Feel.Tick)
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Glyph.Brain, Ink.Three, size = 16.dp)
-            Spacer(Modifier.width(8.dp))
             AnimatedContent(
                 active,
-                Modifier.weight(1f),
                 transitionSpec = {
-                    if (calm) {
-                        fadeIn(tween(120)) togetherWith fadeOut(tween(90))
-                    } else {
-                        (slideInVertically(Motion.calmText()) { it * 6 / 10 } + fadeIn(tween(Motion.M2, easing = Motion.Out))) togetherWith
-                            (slideOutVertically(tween(Motion.M1, easing = Motion.Leave)) { -it / 2 } + fadeOut(tween(90)))
-                    }
+                    if (calm) fadeIn(tween(120)) togetherWith fadeOut(tween(90))
+                    else (slideInVertically(Motion.calmText()) { it * 6 / 10 } + fadeIn(tween(Motion.M2, easing = Motion.Out))) togetherWith
+                        (slideOutVertically(tween(Motion.M1, easing = Motion.Leave)) { -it / 2 } + fadeOut(tween(90)))
                 },
                 label = "think",
             ) { a ->
-                if (a) {
-                    Row {
-                        BasicText(tr("Thinking · ", "Myśli · "), style = meta)
-                        Roll("$secs", meta, digits = true)
-                        BasicText(" s", style = meta)
-                    }
-                } else {
-                    BasicText(done, style = meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                if (a) Shimmer(if (secs > 0) tr("Thinking · $secs s", "Myśli · $secs s") else tr("Thinking", "Myśli"), calm)
+                else BasicText(done, style = Type.Body.copy(color = Ink.Three), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            AnimatedVisibility(!active, enter = scaleIn(spring(0.6f, 600f), 0.6f) + fadeIn(), exit = fadeOut(tween(Motion.M1))) {
-                Icon(Glyph.Right, Ink.Three, Modifier.graphicsLayer { rotationZ = turn.value }, size = 14.dp)
+            AnimatedVisibility(!active, enter = fadeIn(tween(Motion.M2)) + scaleIn(spring(0.6f, 600f), 0.6f), exit = fadeOut(tween(Motion.M1))) {
+                Icon(Glyph.Right, Ink.Three, Modifier.padding(start = 4.dp).graphicsLayer { rotationZ = turn.value }, size = 14.dp)
             }
         }
         AnimatedVisibility(
@@ -586,9 +586,37 @@ private fun Thinking(thought: () -> String, active: Boolean, since: Long, tookMs
             enter = if (calm) fadeIn(tween(Motion.M2)) else expandVertically(spring(0.9f, 450f)) + fadeIn(tween(Motion.M2, delayMillis = 60)),
             exit = if (calm) fadeOut(tween(Motion.M2)) else shrinkVertically(tween(Motion.M2, easing = Motion.Leave)) + fadeOut(tween(Motion.M1)),
         ) {
-            BasicText(thought().trim(), Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), style = Type.Meta)
+            Row(Modifier.padding(top = 6.dp, bottom = 4.dp).height(IntrinsicSize.Min)) {
+                Box(Modifier.width(2.dp).fillMaxHeight().background(Tone.Raise, CircleShape))
+                Spacer(Modifier.width(12.dp))
+                BasicText(thought().trim(), style = Type.Meta.copy(color = Ink.Three))
+            }
         }
     }
+}
+
+/** A label with light passing through it from left to right, the way a phone says it is working. */
+@Composable
+private fun Shimmer(text: String, calm: Boolean) {
+    if (calm) {
+        BasicText(text, style = Type.Body.copy(color = Ink.Two))
+        return
+    }
+    val sweep by rememberInfiniteTransition(label = "shimmer").animateFloat(
+        -0.6f, 1.6f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "sweep",
+    )
+    var w by remember { mutableIntStateOf(1) }
+    val x = sweep * w
+    BasicText(
+        text,
+        Modifier.onSizeChanged { w = it.width.coerceAtLeast(1) },
+        style = Type.Body.copy(
+            brush = Brush.linearGradient(
+                0f to Ink.Four, 0.5f to Ink.One, 1f to Ink.Four,
+                start = Offset(x - w * 0.35f, 0f), end = Offset(x + w * 0.35f, 0f),
+            ),
+        ),
+    )
 }
 
 /** A short window on the thought as it arrives; each new line slides up into place. */
@@ -600,7 +628,7 @@ private fun ThoughtTail(thought: () -> String, calm: Boolean) {
     val lines = remember { intArrayOf(0) }
     val tail by remember { derivedStateOf { thought().takeLast(240) } }
     Box(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp).height(36.dp).clipToBounds()
+        Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp).height(36.dp).clipToBounds()
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
@@ -724,14 +752,29 @@ private fun RetryButton(m: AppModel) {
 @Composable
 private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit) {
     val shell = LocalShell.current
-    val accent = LocalAccent.current
+    val calm = shell.calm
     var draft by rememberSaveable(m.current) { mutableStateOf("") }
+    val attached = remember(m.current) { mutableStateListOf<Attachment>() }
+    var adding by remember(m.current) { mutableStateOf(false) }
+    var lines by remember { mutableIntStateOf(1) }
+    val app = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val take: (List<Uri>) -> Unit = { uris ->
+        scope.launch {
+            for (u in uris) {
+                Attachment.read(app, u) { name -> toast.show(tr("$name is not a picture or a text file", "$name to nie zdjęcie ani plik tekstowy")) }
+                    ?.let { a -> if (attached.none { it.name == a.name && it.bytes == a.bytes }) attached += a }
+            }
+        }
+    }
+    val pickers = rememberPickers(take)
     val empty by remember { derivedStateOf { (m.chat?.raw?.optJSONArray("messages")?.length() ?: 0) == 0 } }
     val loaded = m.status?.model != null
     val offline = m.online == false
     val loading = m.loading != null
     val streaming = m.streaming
-    val ctx = m.chat?.contextName ?: m.defaultContext
+    val pictures = attached.any { it.image != null }
+    val blind = pictures && m.status?.model?.vision == false
     val placeholder = when {
         offline -> tr("Your computer is offline", "Komputer jest niedostępny")
         loading -> tr("Loading the model…", "Wczytuję model…")
@@ -739,49 +782,57 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
         else -> tr("Choose a model to get answers", "Wybierz model, by dostać odpowiedź")
     }
     val blocked = when {
-        streaming || draft.isBlank() -> null
+        streaming || (draft.isBlank() && attached.isEmpty()) -> null
+        blind -> tr("This model cannot see pictures", "Ten model nie widzi zdjęć")
         offline -> tr("Your computer is offline", "Komputer jest niedostępny")
         loading -> tr("Loading the model…", "Wczytuję model…")
         else -> null
     }
+    val tall = lines > 1 || attached.isNotEmpty()
+    val corner by animateDpAsState(if (tall) 24.dp else 28.dp, spring(0.85f, 420f), label = "corner")
+    val pill = RoundedCornerShape(corner)
+
+    if (adding) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { adding = false } })
 
     Column(
         Modifier.align(Alignment.BottomCenter).onSizeChanged { onHeight(it.height) }
             .navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
     ) {
-        Column(Modifier.fillMaxWidth().glass(shell.cardHaze, Shapes.Panel).padding(8.dp)) {
-            BasicTextField(
-                draft,
-                { draft = it },
-                Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                textStyle = Type.Body,
-                cursorBrush = SolidColor(accent),
-                maxLines = 7,
-                decorationBox = { inner ->
-                    Box {
-                        if (draft.isEmpty()) Roll(placeholder, Type.Body.copy(color = Ink.Four))
-                        inner()
-                    }
-                },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MorphSource("composer-context", Surface.Context) {
-                    val tint = if (ctx != null) accent else Ink.Three
-                    Row(
-                        Modifier.morph("composer-context", this, Shapes.ControlLg).height(36.dp)
-                            .pressable(
-                                { shell.open(Surface.Context, "composer-context") },
-                                Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 0.95f, stretch = true, feelOnDown = true,
-                            )
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Glyph.Contexts, tint, size = 18.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Roll(ctx ?: tr("Context", "Kontekst"), Type.Meta.copy(color = tint, fontWeight = FontWeight.Medium), Modifier.widthIn(max = 130.dp))
-                    }
-                }
-                Spacer(Modifier.weight(1f))
+        AddMenu(
+            open = adding,
+            calm = calm,
+            onCamera = { adding = false; pickers.camera() },
+            onPhotos = { adding = false; pickers.photos() },
+            onFiles = { adding = false; pickers.files() },
+        )
+        Column(Modifier.fillMaxWidth().animateContentSize(spring(0.9f, 500f)).glass(shell.cardHaze, pill).padding(6.dp)) {
+            AnimatedVisibility(
+                attached.isNotEmpty(),
+                enter = fadeIn(tween(Motion.M2)) + expandVertically(tween(Motion.M3, easing = Motion.Out)),
+                exit = fadeOut(tween(Motion.M1)) + shrinkVertically(tween(Motion.M2, easing = Motion.Standard)),
+            ) { AttachRow(attached) { attached.remove(it) } }
+            Row(verticalAlignment = Alignment.Bottom) {
+                val turn by animateFloatAsState(if (adding) 45f else 0f, spring(0.6f, 520f), label = "plus")
+                IconBtn(
+                    Glyph.Plus, { adding = !adding },
+                    Modifier.graphicsLayer { rotationZ = turn },
+                    tint = if (adding) Ink.One else Ink.Two, fill = if (adding) Tone.Raise else Color.Transparent, size = 44.dp,
+                )
+                BasicTextField(
+                    draft,
+                    { draft = it },
+                    Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 6.dp, vertical = 11.dp),
+                    textStyle = Type.Body,
+                    cursorBrush = SolidColor(LocalAccent.current),
+                    maxLines = 8,
+                    onTextLayout = { lines = it.lineCount },
+                    decorationBox = { inner ->
+                        Box {
+                            if (draft.isEmpty()) Roll(placeholder, Type.Body.copy(color = Ink.Four))
+                            inner()
+                        }
+                    },
+                )
                 AnimatedContent(
                     !loaded && !loading && !offline && !streaming,
                     transitionSpec = {
@@ -795,22 +846,23 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
                     if (choose) {
                         MorphSource("composer-model", Surface.Model) {
                             Btn(
-                                tr("Choose model", "Wybierz model"),
+                                tr("Model", "Model"),
                                 { shell.open(Surface.Model, "composer-model") },
                                 Modifier.morph("composer-model", this, Shapes.ControlLg),
                                 Variant.Standard,
                                 Glyph.Models,
-                                height = 36.dp,
+                                height = 44.dp,
                             )
                         }
                     } else {
                         SendButton(
                             streaming = streaming,
-                            ready = draft.isNotBlank() && loaded && !offline && !streaming,
+                            ready = (draft.isNotBlank() || attached.isNotEmpty()) && loaded && !offline && !streaming && !blind,
                             blocked = blocked,
                             onSend = {
-                                m.send(draft)
+                                m.send(draft, attached.toList())
                                 draft = ""
+                                attached.clear()
                             },
                             onStop = { m.stop() },
                             onBlocked = { toast.show(it) },
