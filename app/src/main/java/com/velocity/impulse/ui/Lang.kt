@@ -4,7 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** English or Polish, following the language the profile chose in Impulse. */
+/** English for now. The Polish strings stay beside each English one for when the app follows Impulse's language again. */
 object Lang {
     var pl by mutableStateOf(false)
 

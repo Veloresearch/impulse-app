@@ -52,7 +52,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -147,20 +151,21 @@ fun AttachRow(items: List<Attachment>, onRemove: (Attachment) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(Space.S2),
     ) {
         items(items, key = { it.name + it.bytes }) { a ->
-            Box(Modifier.animateItem()) {
+            val item = remember(a) { PreviewItem(a.name, a.bytes, a.image, a.text, a.thumb) }
+            Box(Modifier.animateItem().hiddenWhile(item)) {
                 val thumb = remember(a.thumb) { a.thumb?.let(::bitmap) }
                 if (thumb != null) {
-                    Image(thumb, a.name, Modifier.size(60.dp).clip(Shapes.Tile), contentScale = ContentScale.Crop)
+                    Image(thumb, a.name, Modifier.size(60.dp).opens(item).clip(Shapes.Tile), contentScale = ContentScale.Crop)
                 } else {
                     Row(
-                        Modifier.height(60.dp).widthIn(max = 200.dp).background(Tone.Raise, Shapes.Tile).padding(horizontal = Space.S3),
+                        Modifier.height(60.dp).widthIn(max = 200.dp).opens(item).background(Tone.Raise, Shapes.Tile).padding(horizontal = Space.S3),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Glyph.File, LocalAccent.current, size = 20.dp)
                         Spacer(Modifier.width(Space.S2))
                         Column {
                             BasicText(a.name, style = Type.Meta.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            BasicText(size(a.bytes), style = Type.Label)
+                            BasicText(sizeOf(a.bytes), style = Type.Label)
                         }
                     }
                 }
@@ -179,11 +184,16 @@ fun AttachRow(items: List<Attachment>, onRemove: (Attachment) -> Unit) {
 fun SentFiles(files: List<org.json.JSONObject>) {
     Row(Modifier.padding(bottom = Space.S1), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         files.take(4).forEach { f ->
-            val thumb = remember(f) { f.optString("thumb").takeIf { it.startsWith("data:image/") }?.let(::bitmap) }
+            val url = remember(f) { f.optString("thumb").takeIf { it.startsWith("data:image/") } }
+            val thumb = remember(f) { url?.let(::bitmap) }
+            val item = remember(f) { PreviewItem(f.optString("name"), f.optLong("bytes"), url, kept = true) }
             if (thumb != null) {
-                Image(thumb, null, Modifier.size(72.dp).clip(Shapes.Tile), contentScale = ContentScale.Crop)
+                Image(thumb, null, Modifier.size(72.dp).hiddenWhile(item).opens(item).clip(Shapes.Tile), contentScale = ContentScale.Crop)
             } else {
-                Row(Modifier.height(36.dp).background(Tone.Raise, Shapes.ControlLg).padding(horizontal = Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.height(36.dp).hiddenWhile(item).opens(item).background(Tone.Raise, Shapes.ControlLg).padding(horizontal = Space.S3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(Glyph.File, Ink.Three, size = 16.dp)
                     Spacer(Modifier.width(6.dp))
                     BasicText(f.optString("name"), Modifier.widthIn(max = 160.dp), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -193,12 +203,25 @@ fun SentFiles(files: List<org.json.JSONObject>) {
     }
 }
 
-private fun bitmap(uri: String) = runCatching {
+/** A thumbnail that grows into the full-screen preview when tapped. */
+@Composable
+private fun Modifier.opens(item: PreviewItem): Modifier {
+    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    return onPlaced { at[0] = it }.pressable(
+        { at[0]?.takeIf { it.isAttached }?.let { PreviewState.open(item, it.boundsInRoot()) } },
+        depth = 0.94f,
+    )
+}
+
+/** Hidden while the preview is the thumbnail, so it never shows twice. */
+private fun Modifier.hiddenWhile(item: PreviewItem) = graphicsLayer { alpha = if (PreviewState.item === item) 0f else 1f }
+
+internal fun bitmap(uri: String) = runCatching {
     val b = Base64.decode(uri.substringAfter("base64,"), Base64.DEFAULT)
     BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
 }.getOrNull()
 
-private fun size(n: Long) = when {
+internal fun sizeOf(n: Long) = when {
     n >= 1_000_000 -> "%.1f MB".format(n / 1e6)
     n >= 1_000 -> "%.0f KB".format(n / 1e3)
     else -> "$n B"

@@ -38,13 +38,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Surface
@@ -144,6 +149,42 @@ fun MorphSheet(surface: Surface, content: @Composable ColumnScope.() -> Unit) {
         val pull = remember { Animatable(0f) }
         var h by remember { mutableFloatStateOf(1f) }
         val scope = rememberCoroutineScope()
+        fun follow(d: Float, floor: Boolean = false) {
+            scope.launch {
+                val old = pull.value
+                val new = if (floor) (old + d).coerceAtLeast(0f) else old + d
+                pull.snapTo(if (new < 0f) rubber(new, stretch) else new)
+                val edge = 0.25f * h
+                if ((old - edge) * (pull.value - edge) < 0f) view.feel(Feel.Tick)
+            }
+        }
+        suspend fun settle(v: Float) {
+            if (pull.value > 0.25f * h || v > 1200f) shell.close(surface)
+            else pull.animateTo(0f, spring(0.7f, 500f))
+        }
+        // A list inside the sheet scrolls first; once it is at its top, pulling down moves the sheet.
+        val pullDown = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput || available.y >= 0f || pull.value <= 0f) return Offset.Zero
+                    val used = maxOf(available.y, -pull.value)
+                    follow(used, floor = true)
+                    return Offset(0f, used)
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput || available.y <= 0f) return Offset.Zero
+                    follow(available.y)
+                    return Offset(0f, available.y)
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (pull.value <= 0f) return Velocity.Zero
+                    settle(available.y)
+                    return available
+                }
+            }
+        }
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier.fillMaxSize()
@@ -161,22 +202,8 @@ fun MorphSheet(surface: Surface, content: @Composable ColumnScope.() -> Unit) {
                     .fillMaxWidth()
                     .heightIn(max = tallest)
                     .onSizeChanged { h = it.height.toFloat().coerceAtLeast(1f) }
-                    .draggable(
-                        rememberDraggableState { d ->
-                            scope.launch {
-                                val old = pull.value
-                                val new = old + d
-                                pull.snapTo(if (new < 0f) rubber(new, stretch) else new)
-                                val edge = 0.25f * h
-                                if ((old - edge) * (pull.value - edge) < 0f) view.feel(Feel.Tick)
-                            }
-                        },
-                        Orientation.Vertical,
-                        onDragStopped = { v ->
-                            if (pull.value > 0.25f * h || v > 1200f) shell.close(surface)
-                            else pull.animateTo(0f, spring(0.7f, 500f))
-                        },
-                    )
+                    .draggable(rememberDraggableState { follow(it) }, Orientation.Vertical, onDragStopped = { settle(it) })
+                    .nestedScroll(pullDown)
                     .morphBody()
                     .padding(start = Space.S4, end = Space.S4, bottom = Space.S4),
             ) {

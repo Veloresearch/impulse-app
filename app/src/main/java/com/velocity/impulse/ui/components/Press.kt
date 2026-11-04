@@ -8,7 +8,6 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -22,8 +21,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -73,7 +74,7 @@ fun Modifier.pressable(
     val down by source.collectIsPressedAsState()
     val sink = if (depth >= 0.98f) spring<Float>(1f, 700f) else spring<Float>(0.6f, 500f)
     val scale by animateFloatAsState(if (down && live && depth != 1f) depth else 1f, sink, label = "press")
-    val fill by animateColorAsState(
+    val fill = animateColorAsState(
         if (down && live) pressed else rest,
         tween(if (down) Motion.M1 else Motion.M2, easing = Motion.Standard),
         label = "fill",
@@ -112,7 +113,7 @@ fun Modifier.pressable(
                 if (tilt > 0f) scope.launch { lean.snapTo(aim(c.position)) }
             }
             scope.launch { pull.animateTo(Offset.Zero, spring(dampingRatio = 0.38f, stiffness = 380f)) }
-            scope.launch { lean.animateTo(Offset.Zero, spring(dampingRatio = 0.42f, stiffness = 260f)) }
+            scope.launch { lean.animateTo(Offset.Zero, spring(dampingRatio = 0.62f, stiffness = 300f)) }
         }
     }
     if (blocked != null) m = m.shake(refused)
@@ -135,7 +136,11 @@ fun Modifier.pressable(
             else -> 0.45f
         }
     }
-    if (shape != null && (rest != Color.Transparent || pressed != Color.Transparent)) m = m.background(fill, shape)
+    // Drawn, not composed: the fill fades on every frame of a press.
+    if (shape != null && (rest != Color.Transparent || pressed != Color.Transparent)) m = m.drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        onDrawBehind { drawOutline(outline, fill.value) }
+    }
     m.combinedClickable(
         interactionSource = source,
         indication = null,

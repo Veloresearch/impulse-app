@@ -354,9 +354,12 @@ private fun Messages(
     ) {
         itemsIndexed(items, key = { _, msg -> msg.id }) { i, msg ->
             val user = msg.role == "user"
-            val appear = remember { MutableTransitionState(!seen.add(msg.id)).apply { targetState = true } }
-            AnimatedVisibility(
-                visibleState = appear,
+            // Only a message that arrives while the chat is open animates in; scrolling never pays for it.
+            val fresh = remember { seen.add(msg.id) }
+            if (!fresh) {
+                if (user) UserBubble(msg, toast) else Answer(m, chat, msg, msg.id == liveId, i == 0, atBottom)
+            } else AnimatedVisibility(
+                visibleState = remember { MutableTransitionState(false).apply { targetState = true } },
                 enter = when {
                     calm -> fadeIn(tween(Motion.M2))
                     user -> slideInVertically(spring(0.82f, 420f)) { rise } +
@@ -602,20 +605,24 @@ private fun Shimmer(text: String, calm: Boolean) {
         BasicText(text, style = Type.Body.copy(color = Ink.Two))
         return
     }
-    val sweep by rememberInfiniteTransition(label = "shimmer").animateFloat(
+    val sweep = rememberInfiniteTransition(label = "shimmer").animateFloat(
         -0.6f, 1.6f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "sweep",
     )
-    var w by remember { mutableIntStateOf(1) }
-    val x = sweep * w
     BasicText(
         text,
-        Modifier.onSizeChanged { w = it.width.coerceAtLeast(1) },
-        style = Type.Body.copy(
-            brush = Brush.linearGradient(
-                0f to Ink.Four, 0.5f to Ink.One, 1f to Ink.Four,
-                start = Offset(x - w * 0.35f, 0f), end = Offset(x + w * 0.35f, 0f),
-            ),
-        ),
+        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
+            drawContent()
+            val w = size.width
+            val x = sweep.value * w
+            drawRect(
+                Brush.linearGradient(
+                    0f to Color.Transparent, 0.5f to Ink.One, 1f to Color.Transparent,
+                    start = Offset(x - w * 0.35f, 0f), end = Offset(x + w * 0.35f, 0f),
+                ),
+                blendMode = BlendMode.SrcAtop,
+            )
+        },
+        style = Type.Body.copy(color = Ink.Four),
     )
 }
 

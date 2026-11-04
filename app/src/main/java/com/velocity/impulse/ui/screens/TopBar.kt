@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
+import com.velocity.impulse.data.Loaded
 import com.velocity.impulse.data.Probe
 import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang.tr
@@ -81,6 +84,7 @@ import com.velocity.impulse.ui.Shell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Feel
+import com.velocity.impulse.ui.components.Field
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
@@ -231,8 +235,7 @@ private fun DetailsButton(m: AppModel, shell: Shell) {
             .glass(shell.cardHaze, CircleShape),
     ) {
         IconBtn(
-            Glyph.Sidebar, shell::openDetails,
-            Modifier.graphicsLayer { rotationY = 180f },
+            Glyph.Info, shell::openDetails,
             tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !empty, island = true,
         )
     }
@@ -258,9 +261,33 @@ private fun Arc(color: Color, modifier: Modifier, whole: () -> Float) {
 
 private val Efforts = listOf("off", "low", "medium", "high", "max")
 
-private enum class Phase { Idle, Loading, Landed, Failed }
+private enum class Phase { Idle, Current, Loading, Landed, Failed }
 
-/** The one model surface: what is loaded, how hard it thinks, and the rest on the computer. */
+/** Publishers by the same tests, in the same order, as the faces in ModelFace. */
+private val Publishers = listOf(
+    "bonsai|prism" to "Prism ML",
+    "deepseek" to "DeepSeek",
+    "qwen|qwq" to "Qwen",
+    "gemma" to "Google",
+    "llama" to "Meta",
+    "mi[sx]tral|ministral|magistral|devstral|codestral" to "Mistral AI",
+    "(^|[^a-z])phi" to "Microsoft",
+    "gpt-?oss" to "OpenAI",
+    "granite" to "IBM",
+    "smollm" to "Hugging Face",
+    "glm" to "Z.ai",
+    "kimi" to "Moonshot AI",
+    "olmo" to "Ai2",
+    "nemotron" to "NVIDIA",
+    "lfm" to "Liquid AI",
+).map { (test, name) -> Regex(test, RegexOption.IGNORE_CASE) to name }
+
+private fun publisherOf(p: Probe): String? = "${p.name} ${p.family}".let { s -> Publishers.firstOrNull { it.first.containsMatchIn(s) }?.second }
+
+/** The search field shows up once the list no longer fits at a glance. */
+private const val Searchable = 6
+
+/** The one model surface: what is loaded and how hard it thinks, then the library by publisher. */
 @Composable
 fun ColumnScope.ModelSheetBody(m: AppModel) {
     val shell = LocalShell.current
@@ -281,7 +308,7 @@ fun ColumnScope.ModelSheetBody(m: AppModel) {
                 landed = ok
                 view.feel(if (ok) Feel.Lock else Feel.Reject)
                 if (ok) {
-                    delay(700)
+                    delay(900)
                     shell.done()
                 }
             }
@@ -293,45 +320,35 @@ fun ColumnScope.ModelSheetBody(m: AppModel) {
     BasicText(tr("The model on your computer that writes the answers.", "Model na Twoim komputerze, który pisze odpowiedzi."), style = Type.Meta)
     Spacer(Modifier.height(Space.S4))
 
-    AnimatedContent(
-        loaded,
-        Modifier.fillMaxWidth().background(Tone.Raise, Shapes.Card).padding(Space.S4),
-        transitionSpec = {
-            val enter = if (shell.calm) fadeIn(tween(Motion.M2)) else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 }
-            enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
-        },
-        contentKey = { it?.path },
-        label = "hero",
-    ) { l ->
-        if (l == null) {
-            Column(Modifier.fillMaxWidth()) {
-                BasicText(tr("No model loaded", "Nie wczytano modelu"), style = Type.Section)
-                BasicText(tr("Tap one below to load it.", "Dotknij jednego poniżej, żeby go wczytać."), style = Type.Meta)
-            }
-        } else {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    BasicText(l.name, style = Type.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    m.library.firstOrNull { same(it.path, l.path) }?.let { BasicText(modelLine(it), style = Type.Meta, maxLines = 1) }
-                    val memory = tokens(l.context.toLong())
-                    BasicText(tr("Memory per chat: $memory", "Pamięć na czat: $memory"), style = Type.Meta, maxLines = 1)
-                }
-                Spacer(Modifier.width(Space.S2))
-                Btn(tr("Unload", "Zwolnij"), { m.unload() }, variant = Variant.Quiet, height = 36.dp)
+    val hold = animateFloatAsState(if (m.loading != null) 0.55f else 1f, tween(Motion.M2), label = "hold")
+    Column(Modifier.fillMaxWidth().graphicsLayer { alpha = hold.value }.background(Tone.Raise, Shapes.Card).padding(Space.S4)) {
+        AnimatedContent(
+            loaded,
+            Modifier.fillMaxWidth(),
+            transitionSpec = {
+                val enter = if (shell.calm) fadeIn(tween(Motion.M2))
+                else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 } + scaleIn(Motion.calmText(), 0.96f)
+                enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
+            },
+            contentKey = { it?.path },
+            label = "hero",
+        ) { Hero(m, it) }
+        AnimatedVisibility(
+            loaded?.thinks == true,
+            enter = expandVertically(tween(Motion.M2, easing = Motion.Out)) + fadeIn(tween(Motion.M2)),
+            exit = shrinkVertically(tween(Motion.M2, easing = Motion.Out)) + fadeOut(tween(Motion.M1)),
+        ) {
+            Column(Modifier.padding(top = Space.S4)) {
+                BasicText(tr("Thinking", "Myślenie"), style = Type.Label, modifier = Modifier.padding(start = Space.S1, bottom = Space.S2))
+                Segmented(
+                    listOf(tr("Instant", "Od razu"), tr("Low", "Krótko"), tr("Medium", "Średnio"), tr("High", "Dużo"), "Max"),
+                    Efforts.indexOf(m.effort ?: "medium").coerceAtLeast(0),
+                    { m.pickEffort(Efforts[it]) },
+                )
             }
         }
     }
     Spacer(Modifier.height(Space.S4))
-
-    if (loaded?.thinks != false) {
-        BasicText(tr("Thinking", "Myślenie"), style = Type.Label, modifier = Modifier.padding(start = Space.S1, bottom = Space.S2))
-        Segmented(
-            listOf(tr("Instant", "Od razu"), tr("Low", "Krótko"), tr("Medium", "Średnio"), tr("High", "Dużo"), "Max"),
-            Efforts.indexOf(m.effort ?: "medium").coerceAtLeast(0),
-            { m.pickEffort(Efforts[it]) },
-        )
-        Spacer(Modifier.height(Space.S4))
-    }
 
     BasicText(tr("On your computer", "Na Twoim komputerze"), style = Type.Label, modifier = Modifier.padding(start = Space.S1, bottom = Space.S2))
     if (m.library.isEmpty()) {
@@ -340,29 +357,105 @@ fun ColumnScope.ModelSheetBody(m: AppModel) {
             style = Type.Body.copy(color = Ink.Three),
         )
     }
-    // The row being loaded stays until the sheet closes, so its check is seen landing.
-    val rows = m.library.filter { !same(it.path, loaded?.path) || same(it.path, held) }
+    var query by remember { mutableStateOf("") }
+    val searching = m.library.size > Searchable
+    if (searching) {
+        Field(query, { query = it }, tr("Search models", "Szukaj modeli"))
+        Spacer(Modifier.height(Space.S2))
+    }
+    val q = if (searching) query.trim() else ""
+    val groups = remember(m.library, q) {
+        m.library
+            .filter { q.isEmpty() || it.name.contains(q, true) || publisherOf(it)?.contains(q, true) == true }
+            .groupBy(::publisherOf)
+            .entries.sortedWith(compareBy(nullsLast<String>()) { it.key?.lowercase() })
+    }
+    if (q.isNotEmpty() && groups.isEmpty()) {
+        BasicText(tr("No models match “$q”.", "Żaden model nie pasuje do „$q”."), Modifier.padding(start = Space.S1, top = Space.S2), style = Type.Meta)
+    }
     LazyColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        items(rows, key = { it.path }) { p ->
-            val phase = when {
-                same(m.loading, p.path) -> Phase.Loading
-                !same(held, p.path) -> Phase.Idle
-                landed == true -> Phase.Landed
-                landed == false -> Phase.Failed
-                else -> Phase.Idle
+        for ((publisher, rows) in groups) {
+            item(key = "group:${publisher.orEmpty()}") {
+                Row(Modifier.animateItem().padding(start = Space.S1, top = Space.S3, bottom = Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    BasicText(publisher ?: tr("Other", "Inne"), style = Type.Label.copy(color = Ink.Two, fontWeight = FontWeight.SemiBold))
+                    Spacer(Modifier.width(Space.S2))
+                    BasicText("${rows.size}", style = Type.Label.copy(color = Ink.Four))
+                }
             }
-            ModelRow(m, p, phase, Modifier.animateItem())
+            items(rows, key = { it.path }) { p ->
+                val mine = same(held, p.path)
+                val phase = when {
+                    same(m.loading, p.path) -> Phase.Loading
+                    mine && landed == true -> Phase.Landed
+                    mine && landed == false -> Phase.Failed
+                    same(loaded?.path, p.path) -> Phase.Current
+                    else -> Phase.Idle
+                }
+                ModelRow(m, p, phase, Modifier.animateItem())
+            }
         }
+    }
+}
+
+/** The loaded model as a card: face, name, what it is, and what it can do. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Hero(m: AppModel, l: Loaded?) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (l == null) {
+                Box(Modifier.size(52.dp).background(Tone.Hover, Squircle(52.dp * 0.22f)), contentAlignment = Alignment.Center) {
+                    Icon(Glyph.Models, Ink.Three, size = 22.dp)
+                }
+            } else {
+                ModelFace(m, l.name, l.family, 52.dp)
+            }
+            Spacer(Modifier.width(Space.S3))
+            Column(Modifier.weight(1f)) {
+                BasicText(l?.name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Section, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val line = if (l == null) tr("Tap one below to load it.", "Dotknij jednego poniżej, żeby go wczytać.")
+                else m.library.firstOrNull { same(it.path, l.path) }?.let(::modelLine).orEmpty()
+                if (line.isNotEmpty()) BasicText(line, style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (l != null) {
+                Spacer(Modifier.width(Space.S2))
+                Btn(tr("Unload", "Zwolnij"), { m.unload() }, variant = Variant.Quiet, height = 36.dp, enabled = m.loading == null)
+            }
+        }
+        if (l != null) {
+            Spacer(Modifier.height(Space.S3))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val memory = tokens(l.context.toLong())
+                Tag(tr("$memory per chat", "$memory na czat"))
+                if (l.thinks) Tag(tr("Thinking", "Myślenie"), Glyph.Brain)
+                if (l.vision) Tag(tr("Vision", "Obraz"), Glyph.Eye)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Tag(text: String, icon: Glyph? = null) {
+    Row(
+        Modifier.background(Tone.Hover, Shapes.ControlSm).padding(horizontal = Space.S2, vertical = Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, Ink.Two, size = 12.dp)
+            Spacer(Modifier.width(Space.S1))
+        }
+        BasicText(text, style = Type.Label.copy(color = Ink.Two))
     }
 }
 
 @Composable
 private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = Modifier) {
     val accent = LocalAccent.current
-    val calm = LocalShell.current.calm
+    val shell = LocalShell.current
+    val calm = shell.calm
     val tappable = m.loading == null && phase != Phase.Landed
     val dim by animateFloatAsState(if (m.loading != null && phase != Phase.Loading) 0.45f else 1f, tween(Motion.M2), label = "dim")
-    val rest by animateColorAsState(if (phase == Phase.Landed) Tone.Raise else Tone.Panel, tween(Motion.M2), label = "rest")
+    val rest by animateColorAsState(if (phase == Phase.Landed || phase == Phase.Current) Tone.Raise else Tone.Panel, tween(Motion.M2), label = "rest")
     val wash = remember { Animatable(0f) }
     val err = remember { Animatable(0f) }
     val ring = remember { Animatable(0f) }
@@ -397,7 +490,7 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
                 err.snapTo(1f)
                 err.animateTo(0f, tween(1200))
             }
-            Phase.Idle -> {
+            Phase.Idle, Phase.Current -> {
                 ring.snapTo(0f)
                 fill.snapTo(0f)
                 tick.snapTo(0f)
@@ -410,7 +503,7 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
             Modifier.fillMaxWidth().heightIn(min = 60.dp)
                 .graphicsLayer { alpha = dim }
                 .pressable(
-                    { if (tappable) m.load(p) },
+                    { if (phase == Phase.Current) shell.done() else if (tappable) m.load(p) },
                     Shapes.ControlLg, rest, if (tappable) Tone.Press else rest,
                     depth = 1f, feel = if (tappable) Feel.Tick else null,
                 )
@@ -444,6 +537,9 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
             }
             AnimatedVisibility(phase == Phase.Loading && secs >= 1, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
                 Roll("$secs s", Type.Meta, Modifier.padding(start = Space.S2), digits = true)
+            }
+            if (phase == Phase.Current) {
+                BasicText(tr("Loaded", "Wczytany"), Modifier.padding(start = Space.S2), style = Type.Label.copy(color = accent, fontWeight = FontWeight.SemiBold))
             }
         }
         AnimatedVisibility(
@@ -486,6 +582,12 @@ private fun LoadMark(accent: Color, ring: () -> Float, fill: () -> Float, tick: 
     }
 }
 
+private val QuantName = Regex("(?<![A-Za-z0-9])(I?Q\\d(?:_[A-Z0-9]+)*|BF16|F16|F32|MXFP4)(?![A-Za-z0-9])", RegexOption.IGNORE_CASE)
+
+/** The quantisation as the file name spells it (Q4_K_M, IQ3_XXS, BF16), else the format. */
+fun quantOf(p: Probe): String =
+    QuantName.findAll(p.path.substringAfterLast('/').substringAfterLast('\\')).lastOrNull()?.value?.uppercase() ?: p.format.uppercase()
+
 fun modelLine(p: Probe): String {
     val params = when {
         p.params >= 1_000_000_000 -> "%.1fB".format(p.params / 1e9).replace(".0B", "B")
@@ -493,5 +595,5 @@ fun modelLine(p: Probe): String {
         else -> null
     }
     val size = if (p.bytes > 0) "%.1f GB".format(p.bytes / 1e9) else null
-    return listOfNotNull(params, p.format.uppercase(), size).joinToString(" · ")
+    return listOfNotNull(params, quantOf(p), size).joinToString(" · ")
 }

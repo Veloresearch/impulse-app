@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,7 +70,7 @@ fun ListRow(
 ) {
     val base = modifier.fillMaxWidth().heightIn(min = 56.dp)
     Row(
-        (if (onClick != null) base.pressable(onClick, null, Tone.Panel, Tone.Raise, depth = 1f, feel = null) else base.background(Tone.Panel))
+        (if (onClick != null) base.pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = null) else base.background(Tone.Panel))
             .padding(horizontal = Space.S4, vertical = Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +59,7 @@ private fun Modifier.arrive(shell: Shell, slot: Int) = graphicsLayer {
     val p = (k * 1.5f - slot * 0.07f).coerceIn(0f, 1f)
     translationX = (1f - p) * 48.dp.toPx()
     alpha = p
+    compositingStrategy = CompositingStrategy.ModulateAlpha
 }
 
 /**

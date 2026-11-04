@@ -4,6 +4,7 @@ import com.velocity.impulse.ui.screens.Details
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
+import android.view.View
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -25,22 +26,24 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -61,10 +64,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.zIndex
@@ -88,21 +95,26 @@ import com.velocity.impulse.ui.screens.ContextSheetBody
 import com.velocity.impulse.ui.screens.Conversation
 import com.velocity.impulse.ui.screens.Drawer
 import com.velocity.impulse.ui.screens.ModelSheetBody
+import com.velocity.impulse.ui.screens.PreviewHost
 import com.velocity.impulse.ui.screens.SettingsPage
 import com.velocity.impulse.ui.screens.SignInScreen
 import com.velocity.impulse.ui.screens.TopIsland
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
+import com.velocity.impulse.ui.theme.Radius
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import com.velocity.impulse.ui.theme.accentOf
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToInt
+import kotlin.math.sign
 
 @Composable
 fun App(m: AppModel) {
@@ -184,6 +196,7 @@ private fun Main(m: AppModel) {
                 MorphSheet(Surface.Context) { ContextSheetBody(m) }
                 FlightOverlay(shell.flight)
                 Backs(shell)
+                PreviewHost()
             }
         }
     }
@@ -197,52 +210,22 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
     val keyboard = LocalSoftwareKeyboardController.current
     val drawer = shell.drawer
     val wPx = with(LocalDensity.current) { shell.drawerWidth.toPx() }
+    val offstage = (wPx * 2).roundToInt()
     val calm = shell.calm
-    val shown by remember { derivedStateOf { drawer.value > 0f } }
+    val facing by remember { derivedStateOf { sign(drawer.value) } }
 
     Box(
         Modifier.fillMaxSize()
             .recede(shell, depth)
-            .draggable(
-                rememberDraggableState { d ->
-                    scope.launch {
-                        val old = drawer.value
-                        val x = old + d / wPx
-                        val low = if (m.current != null) -1f else 0f
-                        drawer.snapTo(
-                            when {
-                                x > 1f -> 1f + rubber(x - 1f, 0.04f)
-                                x < low -> low - rubber(low - x, 0.04f)
-                                else -> x
-                            },
-                        )
-                        if ((old - 0.5f) * (drawer.value - 0.5f) < 0f || (old + 0.5f) * (drawer.value + 0.5f) < 0f) view.feel(Feel.Tick)
-                    }
-                },
-                Orientation.Horizontal,
-                enabled = shell.pages.currentState == null && shell.sheets.currentState == null,
-                startDragImmediately = drawer.isRunning,
-                onDragStarted = { keyboard?.hide() },
-                onDragStopped = { v ->
-                    val vp = v / wPx
-                    val at = drawer.value
-                    val low = if (m.current != null) -1f else 0f
-                    val target = when {
-                        abs(vp) > 1.4f && vp > 0f -> if (at < 0f) 0f else 1f
-                        abs(vp) > 1.4f -> if (at > 0f) 0f else low
-                        at > 0.5f -> 1f
-                        at < -0.5f -> low
-                        else -> 0f
-                    }
-                    drawer.animateTo(target, Motion.drawer(), initialVelocity = vp)
-                },
-            ),
+            .sideSwipe(shell, wPx, scope, view) { keyboard?.hide() },
     ) {
+        // The hidden side panel steps off stage so it never takes touches meant for the open one.
         Drawer(
             m,
-            Modifier.zIndex(if (calm && shown) 1f else 0f)
+            Modifier.zIndex(if (calm && facing > 0f) 1f else 0f)
                 .width(shell.drawerWidth)
                 .fillMaxHeight()
+                .offset { IntOffset(if (drawer.value < 0f) -offstage else 0, 0) }
                 .graphicsLayer {
                     val k = drawer.value.coerceIn(0f, 1f)
                     alpha = k
@@ -258,9 +241,10 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
         Details(
             m,
             Modifier.align(Alignment.CenterEnd)
-                .zIndex(if (calm && drawer.value < 0f) 1f else 0f)
+                .zIndex(if (calm && facing < 0f) 1f else 0f)
                 .width(shell.drawerWidth)
                 .fillMaxHeight()
+                .offset { IntOffset(if (drawer.value > 0f) offstage else 0, 0) }
                 .graphicsLayer {
                     val k = (-drawer.value).coerceIn(0f, 1f)
                     alpha = k
@@ -288,7 +272,7 @@ private fun Phone(m: AppModel, shell: Shell, depth: () -> Float) {
                     translationX = p * (wPx + 12.dp.toPx()) - side * (1f - s) * size.width
                     rotationY = -7f * k * side
                     cameraDistance = 18f * density
-                    shape = Shapes.Sheet
+                    shape = Moving
                     clip = true
                 }
                 .drawWithContent {
@@ -312,13 +296,81 @@ private fun Card(m: AppModel, shell: Shell, modifier: Modifier) {
     }
 }
 
+/**
+ * Clip for whole planes in motion. A squircle is a path, which older GPUs clip without
+ * antialiasing and at extra cost on every frame; a rounded rectangle clips in hardware.
+ */
+private val Moving = RoundedCornerShape(Radius.Sheet)
+
+/**
+ * The one horizontal gesture that moves the drawer and the details. Lists, code blocks and pills
+ * see every move first; the swipe claims a drag only once it is clearly sideways and gives it up
+ * as soon as it turns out vertical, so scrolling always wins.
+ */
+private fun Modifier.sideSwipe(shell: Shell, wPx: Float, scope: CoroutineScope, view: View, onStart: () -> Unit) =
+    pointerInput(shell, wPx) {
+        val drawer = shell.drawer
+        val tracker = VelocityTracker()
+        fun low() = if (shell.m.current != null) -1f else 0f
+        fun band(x: Float): Float {
+            val lo = low()
+            return when {
+                x > 1f -> 1f + rubber(x - 1f, 0.04f)
+                x < lo -> lo - rubber(lo - x, 0.04f)
+                else -> x
+            }
+        }
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val free = shell.pages.currentState == null && shell.pages.targetState == null &&
+                shell.sheets.currentState == null && shell.sheets.targetState == null
+            if (!free) return@awaitEachGesture
+            val slop = viewConfiguration.touchSlop
+            var change = down
+            while (true) {
+                val e = awaitPointerEvent()
+                change = e.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                if (!change.pressed || change.isConsumed) return@awaitEachGesture
+                val d = change.position - down.position
+                if (abs(d.x) > slop && abs(d.x) > 1.5f * abs(d.y)) break
+                if (abs(d.y) > slop) return@awaitEachGesture
+            }
+            change.consume()
+            onStart()
+            var raw = drawer.value
+            tracker.resetTracking()
+            tracker.addPointerInputChange(change)
+            val lifted = horizontalDrag(change.id) { c ->
+                raw += c.positionChange().x / wPx
+                tracker.addPointerInputChange(c)
+                c.consume()
+                val to = band(raw)
+                scope.launch {
+                    val old = drawer.value
+                    drawer.snapTo(to)
+                    if ((old - 0.5f) * (to - 0.5f) < 0f || (old + 0.5f) * (to + 0.5f) < 0f) view.feel(Feel.Tick)
+                }
+            }
+            val vp = if (lifted) tracker.calculateVelocity().x / wPx else 0f
+            val at = band(raw)
+            val target = when {
+                vp > 1.4f -> if (at < 0f) 0f else 1f
+                vp < -1.4f -> if (at > 0f) 0f else low()
+                at > 0.5f -> 1f
+                at < -0.5f -> low()
+                else -> 0f
+            }
+            scope.launch { drawer.animateTo(target, Motion.drawer(), initialVelocity = vp) }
+        }
+    }
+
 /** Pushes the planes behind a page or sheet back: smaller, rounded, washed dark. */
 private fun Modifier.recede(shell: Shell, amount: () -> Float) = graphicsLayer {
     val p = amount().coerceIn(0f, 1f)
     if (p == 0f || shell.calm) return@graphicsLayer
     scaleX = 1f - 0.06f * p
     scaleY = scaleX
-    shape = Shapes.Sheet
+    shape = Moving
     clip = true
 }.drawWithContent {
     drawContent()

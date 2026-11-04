@@ -95,7 +95,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private fun api() = Impulse(server!!, token)
 
     init {
-        Lang.pl = prefs.getString("lang", null)?.let { it == "pl" } ?: (java.util.Locale.getDefault().language == "pl")
         if (stage == Stage.SignIn) loadProfiles()
     }
 
@@ -225,10 +224,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     private fun readPrefs(p: JSONObject) {
         fun value(key: String): String? = p.optString(key).ifBlank { null }?.let { runCatching { JSONObject("{\"v\":$it}").opt("v") as? String }.getOrNull() }
-        value("vls.lang")?.let {
-            Lang.pl = it == "pl"
-            prefs.edit().putString("lang", it).apply()
-        }
         value("vls.accent")?.let {
             accent = it
             prefs.edit().putString("accent_name", it).apply()
