@@ -42,15 +42,21 @@ object Signal {
     val Err = Color(0xFFF07A7A)
 }
 
-val Accents = listOf(
-    Color(0xFF7AA2F7),
-    Color(0xFFF0A96A),
-    Color(0xFF9D8CF2),
-    Color(0xFF6CC9B4),
-    Color(0xFFF08AB4),
+/** The panel's accents, by the names it stores them under. */
+val Accents = linkedMapOf(
+    "velocity" to Color(0xFFB3A3C9),
+    "ice" to Color(0xFF7AA2F7),
+    "amber" to Color(0xFFE8BD72),
+    "mint" to Color(0xFF7FD4AC),
+    "violet" to Color(0xFFAB9AF0),
+    "rose" to Color(0xFFEB9AA0),
+    "sand" to Color(0xFFCFC3AC),
+    "mono" to Color(0xFFE8E8E6),
 )
 
-val LocalAccent = compositionLocalOf { Accents[0] }
+fun accentOf(name: String) = Accents[name] ?: Accents.getValue("velocity")
+
+val LocalAccent = compositionLocalOf { Accents.getValue("velocity") }
 val LocalReduceMotion = compositionLocalOf { false }
 
 object Radius {

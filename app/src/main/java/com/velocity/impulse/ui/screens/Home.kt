@@ -1,78 +1,78 @@
 package com.velocity.impulse.ui.screens
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
-import com.velocity.impulse.ui.components.Btn
-import com.velocity.impulse.ui.components.IconBtn
-import com.velocity.impulse.ui.components.ImpulseMark
-import com.velocity.impulse.ui.components.Variant
+import com.velocity.impulse.ui.Lang.tr
+import com.velocity.impulse.ui.components.Glyph
+import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
+import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.Shapes
-import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Space
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 
 @Composable
-fun HomeScreen(m: AppModel, openChat: () -> Unit, openContexts: () -> Unit) {
+fun HomeScreen(m: AppModel, openChat: (String?) -> Unit, openModels: () -> Unit, openContexts: () -> Unit) {
+    val accent = LocalAccent.current
     Page {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ImpulseMark(Modifier.size(36.dp), tile = true)
-            Spacer(Modifier.width(Space.S3))
-            Column(Modifier.weight(1f)) {
-                BasicText(greeting(m.profileName), style = Type.Title)
-                BasicText(m.server?.base?.substringAfter("://") ?: "", style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            IconBtn(Icons.Default.Refresh, { m.refresh() })
+        Column(Modifier.padding(top = Space.S3), verticalArrangement = Arrangement.spacedBy(Space.S1)) {
+            BasicText(m.me?.name?.let { tr("Hi, $it", "Cześć, $it") } ?: "Impulse", style = Type.Display)
+            BasicText(
+                when {
+                    m.online == false -> tr("Your computer cannot be reached right now.", "Nie ma teraz połączenia z Twoim komputerem.")
+                    m.status?.model != null -> tr("Ready. Everything runs on your computer.", "Gotowe. Wszystko działa na Twoim komputerze.")
+                    else -> tr("Load a model to start chatting.", "Wczytaj model, żeby zacząć rozmowę.")
+                },
+                style = Type.Body.copy(color = Ink.Three),
+            )
         }
 
-        Status(m)
-
-        Btn("New chat", { m.newChat(); openChat() }, Modifier.fillMaxWidth(), Variant.Primary, Icons.Default.Add)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
-            Tile("Model", m.models.firstOrNull()?.id ?: "None loaded", m.models.firstOrNull()?.window?.let { "${tokens(it.toLong())} per chat" }, Modifier.weight(1f)) {}
-            Tile("Context", m.context ?: "None", m.contexts.firstOrNull { it.name == m.context }?.tokens?.let { tokens(it) }, Modifier.weight(1f), openContexts)
+        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
+            Tile(Glyph.Chat, tr("New chat", "Nowy czat"), tr("Ask anything", "Zapytaj o cokolwiek"), Modifier.weight(1f).fillMaxHeight(), accent) { openChat(null) }
+            Tile(
+                Glyph.Models, tr("Model", "Model"),
+                m.status?.model?.name ?: tr("Not loaded", "Nie wczytano"), Modifier.weight(1f).fillMaxHeight(), null, openModels,
+            )
         }
+        Tile(
+            Glyph.Contexts, tr("Context", "Kontekst"),
+            m.defaultContext ?: tr("None. Answers use only the chat.", "Brak. Odpowiedzi biorą tylko z czatu."), Modifier.fillMaxWidth(), null, openContexts,
+        )
 
-        if (m.chats.isNotEmpty()) {
-            BasicText("Recent", style = Type.Section, modifier = Modifier.padding(top = Space.S2))
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.background(Tone.App, Shapes.Tile)) {
-                m.chats.take(4).forEach { c ->
+        val recent = m.chats.take(5)
+        if (recent.isNotEmpty()) {
+            BasicText(tr("Continue", "Kontynuuj"), style = Type.Section, modifier = Modifier.padding(top = Space.S3))
+            Column(Modifier.background(Tone.App, Shapes.Tile), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                recent.forEach { c ->
                     Column(
-                        Modifier.fillMaxWidth().pressable({ m.open(c.id); openChat() }, Shapes.Tile, Tone.Panel, Tone.Raise, depth = 0.985f).padding(Space.S4),
+                        Modifier.fillMaxWidth().pressable({ openChat(c.id) }, Shapes.Tile, Tone.Panel, Tone.Raise, depth = 0.99f)
+                            .padding(horizontal = Space.S4, vertical = Space.S3),
                     ) {
-                        BasicText(c.title.ifBlank { "Chat" }, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        BasicText(c.messages.lastOrNull()?.content.orEmpty().replace('\n', ' '), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BasicText(c.title.ifBlank { tr("Chat", "Czat") }, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(whenLabel(c.updatedAt), style = Type.Meta.copy(color = Ink.Four))
+                        }
+                        BasicText(c.messages.lastOrNull()?.text.orEmpty().replace('\n', ' '), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -81,67 +81,36 @@ fun HomeScreen(m: AppModel, openChat: () -> Unit, openContexts: () -> Unit) {
 }
 
 @Composable
-private fun Status(m: AppModel) {
-    val live = m.online == true
-    val dot by animateColorAsState(
-        when (m.online) {
-            true -> Signal.Ok
-            false -> Signal.Err
-            null -> Ink.Four
-        },
-        label = "dot",
-    )
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(1f, 2.4f, infiniteRepeatable(tween(1600), RepeatMode.Restart), label = "ring")
-    Row(
-        Modifier.fillMaxWidth().background(Tone.Panel, Shapes.Card).padding(Space.S4),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-            if (live) Box(
-                Modifier.size(10.dp).graphicsLayer { scaleX = pulse; scaleY = pulse; alpha = (2.4f - pulse) / 1.4f * 0.5f }
-                    .background(dot, CircleShape),
-            )
-            Box(Modifier.size(10.dp).background(dot, CircleShape))
-        }
-        Spacer(Modifier.width(Space.S3))
-        Column(Modifier.weight(1f)) {
-            BasicText(
-                when (m.online) {
-                    true -> "Connected"
-                    false -> "Cannot reach your computer"
-                    null -> "Checking…"
-                },
-                style = Type.Body.copy(fontWeight = FontWeight.SemiBold),
-            )
-            BasicText(m.link?.label ?: "", style = Type.Meta)
-        }
-    }
-}
-
-@Composable
-private fun Tile(label: String, value: String, detail: String?, modifier: Modifier, onClick: () -> Unit) {
+private fun Tile(glyph: Glyph, label: String, value: String, modifier: Modifier, tint: androidx.compose.ui.graphics.Color?, onClick: () -> Unit) {
     Column(
-        modifier.pressable(onClick, Shapes.Card, Tone.Panel, Tone.Raise).padding(Space.S4),
-        verticalArrangement = Arrangement.spacedBy(Space.S1),
+        modifier.pressable(onClick, Shapes.Card, Tone.Panel, Tone.Raise, stretch = true).padding(Space.S4),
     ) {
+        Box(Modifier.size(34.dp).background(tint?.copy(alpha = 0.16f) ?: Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) {
+            Icon(glyph, tint ?: Ink.Two, size = 18.dp)
+        }
+        Spacer(Modifier.height(Space.S3))
         BasicText(label, style = Type.Label)
-        BasicText(value, style = Type.Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicText(detail ?: " ", style = Type.Meta, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        BasicText(value, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
-}
-
-private fun greeting(name: String?): String {
-    val h = java.time.LocalTime.now().hour
-    val part = when (h) {
-        in 5..11 -> "Good morning"
-        in 12..17 -> "Good afternoon"
-        else -> "Good evening"
-    }
-    return if (name.isNullOrBlank()) part else "$part, $name"
 }
 
 fun tokens(n: Long): String = when {
-    n >= 1_000_000 -> "%.1fM tokens".format(n / 1_000_000.0).replace(".0M", "M")
-    n >= 1_000 -> "%.0fK tokens".format(n / 1_000.0)
-    else -> "$n tokens"
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).replace(".0M", "M") + " " + com.velocity.impulse.ui.Lang.tr("tokens", "tokenów")
+    n >= 1_000 -> "%.0fK".format(n / 1_000.0) + " " + com.velocity.impulse.ui.Lang.tr("tokens", "tokenów")
+    else -> "$n " + com.velocity.impulse.ui.Lang.tr("tokens", "tokenów")
+}
+
+/** "15:06" today, "Wednesday" this week, "3 Nov" before that. */
+fun whenLabel(ms: Long): String {
+    if (ms <= 0) return ""
+    val z = java.time.ZoneId.systemDefault()
+    val t = java.time.Instant.ofEpochMilli(ms).atZone(z)
+    val today = java.time.LocalDate.now(z)
+    val loc = if (com.velocity.impulse.ui.Lang.pl) java.util.Locale.forLanguageTag("pl") else java.util.Locale.ENGLISH
+    return when {
+        t.toLocalDate() == today -> "%02d:%02d".format(t.hour, t.minute)
+        t.toLocalDate().isAfter(today.minusDays(7)) -> t.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, loc)
+        else -> "${t.dayOfMonth} ${t.month.getDisplayName(java.time.format.TextStyle.SHORT, loc)}"
+    }
 }

@@ -28,6 +28,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        model.refresh()
+        model.resume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        model.pause()
     }
 }

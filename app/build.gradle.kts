@@ -49,7 +49,6 @@ dependencies {
 
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("dev.chrisbanes.haze:haze:1.0.2")
 
     implementation("androidx.camera:camera-core:1.4.0")
     implementation("androidx.camera:camera-camera2:1.4.0")

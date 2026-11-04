@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,9 +24,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
+import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.data.Context
 import com.velocity.impulse.ui.components.Empty
-import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.PageTitle
 import com.velocity.impulse.ui.components.pressable
@@ -44,18 +41,19 @@ import com.velocity.impulse.ui.theme.Type
 @Composable
 fun ContextsScreen(m: AppModel) {
     Page {
-        PageTitle("Contexts", "Large collections of your documents that a chat can draw on. Pick one and every answer can use it.") {
-            IconBtn(Icons.Default.Refresh, { m.refresh() })
-        }
+        PageTitle(
+            tr("Contexts", "Konteksty"),
+            tr("Large collections of your documents that a chat can draw on. Pick one and every answer can use it.", "Duże zbiory Twoich dokumentów, z których czat może korzystać. Wybierz jeden, a każda odpowiedź może z niego czerpać."),
+        )
         if (m.contexts.isEmpty()) {
             Empty(
-                "No contexts yet",
-                "Contexts are made on the computer, from folders of documents. Create one in Impulse on your PC and it will appear here.",
+                tr("No contexts yet", "Nie ma jeszcze kontekstów"),
+                tr("Contexts are made on the computer, from folders of documents. Create one in Impulse on your PC and it appears here.", "Konteksty tworzysz na komputerze, z folderów z dokumentami. Utwórz jeden w Impulse, a pojawi się tutaj."),
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-                ContextCard(null, m.context == null) { m.useContext(null) }
-                m.contexts.forEach { c -> ContextCard(c, m.context == c.name) { m.useContext(c.name) } }
+                ContextCard(null, m.defaultContext == null) { m.useContext(null) }
+                m.contexts.forEach { c -> ContextCard(c, m.defaultContext == c.name) { m.useContext(c.name) } }
             }
         }
     }
@@ -71,10 +69,10 @@ private fun ContextCard(c: Context?, on: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            BasicText(c?.name ?: "No context", style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
+            BasicText(c?.name ?: tr("No context", "Bez kontekstu"), style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
             BasicText(
-                if (c == null) "Answers use only the chat itself"
-                else listOfNotNull(c.tokens?.let { tokens(it) }, "${c.documents} documents").joinToString(" · "),
+                if (c == null) tr("Answers use only the chat itself", "Odpowiedzi biorą tylko z samego czatu")
+                else listOfNotNull(c.tokens?.let { tokens(it) }, tr("${c.documents} documents", "dokumenty: ${c.documents}")).joinToString(" · "),
                 style = Type.Meta,
             )
         }
@@ -85,7 +83,7 @@ private fun ContextCard(c: Context?, on: Boolean, onClick: () -> Unit) {
                 Modifier.size(26.dp).graphicsLayer { scaleX = mark; scaleY = mark; alpha = mark }.background(accent, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Image(Icons.Default.Check, null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(OnAccent))
+                com.velocity.impulse.ui.components.Icon(com.velocity.impulse.ui.components.Glyph.Check, OnAccent, size = 14.dp)
             }
         }
     }

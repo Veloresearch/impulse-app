@@ -1,6 +1,11 @@
 package com.velocity.impulse.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -59,7 +64,7 @@ fun Btn(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     variant: Variant = Variant.Standard,
-    icon: ImageVector? = null,
+    icon: Glyph? = null,
     enabled: Boolean = true,
     height: Dp = 48.dp,
 ) {
@@ -79,7 +84,7 @@ fun Btn(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Image(icon, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(ink))
+            Icon(icon, ink, size = 18.dp)
             Spacer(Modifier.width(Space.S2))
         }
         BasicText(text, style = Type.Body.copy(color = ink, fontWeight = FontWeight.SemiBold))
@@ -88,7 +93,7 @@ fun Btn(
 
 @Composable
 fun IconBtn(
-    icon: ImageVector,
+    icon: Glyph,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tint: Color = Ink.Two,
@@ -100,7 +105,7 @@ fun IconBtn(
         modifier.size(size).pressable(onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press, depth = 0.88f, enabled = enabled, stretch = true),
         contentAlignment = Alignment.Center,
     ) {
-        Image(icon, null, Modifier.size(size * 0.5f), colorFilter = ColorFilter.tint(tint))
+        Icon(icon, tint, size = size * 0.48f)
     }
 }
 
@@ -152,20 +157,33 @@ fun Field(
     style: TextStyle = Type.Body,
 ) {
     val accent = LocalAccent.current
+    var shown by remember { mutableStateOf(false) }
     BasicTextField(
         value = value,
         onValueChange = onChange,
         singleLine = true,
         textStyle = style,
         cursorBrush = SolidColor(accent),
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = action, autoCorrectEnabled = false),
+        visualTransformation = if (secret && !shown) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = if (secret && shown) KeyboardType.Text else keyboard, imeAction = action, autoCorrectEnabled = false),
         keyboardActions = KeyboardActions(onAny = { onAction() }),
-        modifier = modifier.fillMaxWidth().height(50.dp).background(Tone.Inset, Shapes.ControlLg).padding(horizontal = Space.S4),
+        modifier = modifier.fillMaxWidth().height(50.dp).background(Tone.Inset, Shapes.ControlLg).padding(start = Space.S4, end = if (secret) Space.S1 else Space.S4),
         decorationBox = { inner ->
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) BasicText(placeholder, style = style.copy(color = Ink.Four))
-                inner()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) BasicText(placeholder, style = style.copy(color = Ink.Four))
+                    inner()
+                }
+                if (secret) {
+                    val flip by animateFloatAsState(if (shown) 180f else 0f, Motion.travel(), label = "eye")
+                    Box(
+                        Modifier.size(42.dp).pressable({ shown = !shown }, CircleShape, depth = 0.86f, stretch = true)
+                            .graphicsLayer { rotationY = flip; cameraDistance = 12f * density },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(if (flip > 90f) Glyph.EyeOff else Glyph.Eye, if (shown) accent else Ink.Three, Modifier.graphicsLayer { rotationY = if (flip > 90f) 180f else 0f }, size = 20.dp)
+                    }
+                }
             }
         },
     )
