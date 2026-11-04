@@ -24,7 +24,53 @@ import kotlin.coroutines.resumeWithException
 class ImpulseError(message: String, val code: String? = null, val status: Int = 0) : Exception(message)
 
 data class Profile(val id: String, val name: String, val avatar: String?, val photo: String?, val hasPassword: Boolean, val remote: Boolean)
-data class Context(val name: String, val tokens: Long?, val documents: Int)
+
+/**
+ * A memory as `/api/v2/contexts` lists it. [tokens] is in the loaded model's tokens, null until
+ * that model has read it; [capacity] is how much it may hold.
+ */
+data class Context(val name: String, val tokens: Long?, val documents: Int, val pages: Int = 0, val capacity: Long? = null)
+
+/** What a load would do on this computer (`/api/v2/probe`): where the layers go and what it costs. */
+data class Plan(
+    val backend: String,
+    val gpuLayers: Int?,
+    val context: Int,
+    val vramWeightsMb: Long,
+    val vramKvMb: Long,
+    val reasons: List<String>,
+    val warnings: List<String>,
+    /** The model as the service read it: name, params, train_context, layers… */
+    val probe: JSONObject,
+)
+
+/** A Hugging Face repository in search results. */
+data class HubRepo(val id: String, val author: String, val name: String, val downloads: Long, val likes: Long, val updated: String, val gated: Boolean, val builds: Int, val quants: List<String>, val task: String?)
+
+/** One GGUF in a repository with what it costs here; [verdict] is the service's words, e.g. "Best fit". */
+data class HubFile(val path: String, val quant: String, val kind: String, val loadable: Boolean, val bytes: Long, val vramNeeded: Long, val ramNeeded: Long, val verdict: String, val recommended: Boolean)
+
+data class HubModel(val id: String, val ctx: Int, val vramTotalMb: Long, val ramTotalMb: Long, val gpu: Boolean, val files: List<HubFile>)
+
+/** A model transfer the service runs. [state]: queued, running, verifying, paused, failed or done. */
+data class Download(val name: String, val repo: String, val have: Long, val total: Long, val bytesPerSecond: Long, val etaSeconds: Long, val state: String, val error: String, val percent: Double)
+
+/** A phone or browser signed in from outside the computer. [via]: lan, tailscale or cloudflare; [seenAgo] in seconds. */
+data class Device(val id: String, val name: String, val app: Boolean, val via: String, val ip: String, val profileName: String?, val seenAgo: Long, val signedInAgo: Long)
+
+/** Keep the computer awake: [mode] off, working or always; [holding] it is held awake now. */
+data class KeepAwake(val mode: String, val holding: Boolean, val reason: String)
+
+/** One thing written into a memory, newest first. [tokens] is null until the loaded model has read it. */
+data class Entry(val at: Long, val actor: String, val source: String, val bytes: Long, val tokens: Long?, val position: Long, val preview: String, val truncated: Boolean)
+
+data class Hit(val position: Long, val text: String, val actor: String, val at: Long, val source: String)
+
+/** A memory being built. [phase]: ingest or tokens; [etaSeconds] null while unknown. */
+data class Building(val name: String, val stage: String, val done: Long, val total: Long, val phase: String, val etaSeconds: Long?)
+
+/** What `/api/v2/contexts/write` did: the memory written into and its size after, in the loaded model's tokens when there is one. */
+data class Written(val context: String, val added: Long, val total: Long, val tokens: Long?)
 
 /** A model file in the library, as `/api/v2/models` describes it. */
 data class Probe(val name: String, val path: String, val format: String, val params: Long, val bytes: Long, val trainContext: Int, val family: String = "")
@@ -127,12 +173,26 @@ class Impulse(private val server: Server, private val token: String? = null) {
             .ifBlank { throw ImpulseError("Impulse did not start a session.") }
 
     /** The signed-in profile: its name, its tofu or emoji, and its photo. */
-    suspend fun me(): Profile? = call("/api/v2/profile").takeIf { it.optBoolean("exists") }?.let {
+    suspend fun me(): Profile? = profile(call("/api/v2/profile"))
+
+    private fun profile(o: JSONObject): Profile? = o.takeIf { it.optBoolean("exists") }?.let {
         Profile(
             it.optString("id"), it.optString("name"), it.optString("avatar").takeIf { a -> a.isNotBlank() && a != "null" },
             it.optString("photo").takeIf { p -> p.startsWith("data:image/") }, it.optBoolean("has_password"), it.optBoolean("remote_allowed"),
         )
     }
+
+    /** Changes the signed-in profile's [name], [avatar] (one emoji, or "" for none) or [photo] (a data:image URL, "" to remove). */
+    suspend fun setProfile(name: String? = null, avatar: String? = null, photo: String? = null): Profile? =
+        profile(call("/api/v2/profile", JSONObject().apply {
+            name?.let { put("name", it) }
+            avatar?.let { put("avatar", it.ifEmpty { JSONObject.NULL }) }
+            photo?.let { put("photo", it.ifEmpty { JSONObject.NULL }) }
+        }))
+
+    /** Sets or changes the password ([next]), or takes it off (null); [current] is asked when there is one. */
+    suspend fun setPassword(current: String?, next: String?): Profile? =
+        profile(call("/api/v2/profile/password", JSONObject().put("current", current ?: JSONObject.NULL).put("password", next ?: JSONObject.NULL)))
 
     suspend fun logout() {
         runCatching { call("/api/v2/profiles/logout", JSONObject()) }
@@ -172,11 +232,207 @@ class Impulse(private val server: Server, private val token: String? = null) {
         call("/api/v2/unload", JSONObject())
     }
 
-    /** The profile's panel settings: each value is the JSON the panel stored. */
+    /** What loading [path] with a [context] window (and [backend]) would do here, before it is loaded. */
+    suspend fun probe(path: String, context: Int? = null, backend: String? = null): Plan {
+        val r = call("/api/v2/probe", JSONObject().put("path", path).apply {
+            context?.let { put("context", it) }
+            backend?.let { put("backend", it) }
+        }, long)
+        val p = r.optJSONObject("plan") ?: JSONObject()
+        return Plan(
+            p.optString("backend"), p.optInt("gpu_layers", -1).takeIf { it >= 0 && !p.isNull("gpu_layers") }, p.optInt("context"),
+            p.optLong("vram_weights_mb"), p.optLong("vram_kv_mb"), p.optJSONArray("reasons").strings(), p.optJSONArray("warnings").strings(),
+            r.optJSONObject("probe") ?: JSONObject(),
+        )
+    }
+
+    /**
+     * Loads a model with the load dialog's choices: [gpuLayers] null lets the service decide,
+     * [tuning] is the panel's LoadTuning (batch, threads, flash_attn, n_cpu_moe…), [remember] saves
+     * these as the model's own settings. Returns the service's status of the loaded model.
+     */
+    suspend fun load(path: String, context: Int, gpuLayers: Int? = null, backend: String? = null, tuning: JSONObject? = null, remember: Boolean = false): JSONObject =
+        call("/api/v2/load", JSONObject().put("path", path).put("context", context).put("gpu_layers", gpuLayers ?: JSONObject.NULL).put("remember", remember).apply {
+            backend?.let { put("backend", it) }
+            tuning?.let { put("tuning", it) }
+        }, slow)
+
+    /** Deletes a model file from the library; the service refuses the loaded one. */
+    suspend fun removeModel(path: String) {
+        call("/api/v2/models/remove", JSONObject().put("path", path))
+    }
+
+    /** The load settings saved for a model, or null; [reset] forgets them, [thinking] notes the thinking choice for it. */
+    suspend fun modelSettings(path: String, reset: Boolean? = null, thinking: Boolean? = null): JSONObject? =
+        call("/api/v2/models/settings", JSONObject().put("path", path).apply {
+            reset?.let { put("reset", it) }
+            thinking?.let { put("thinking", it) }
+        }).optJSONObject("settings")
+
+    /** Hugging Face search. [sort]: downloads, likes, trending or updated. Returns the repos and the cursor of the next page. */
+    suspend fun hubSearch(q: String, sort: String = "downloads", author: String = "", limit: Int = 24, cursor: String = ""): Pair<List<HubRepo>, String?> {
+        val r = call("/api/v2/hub/search", JSONObject().put("q", q).put("sort", sort).put("author", author).put("limit", limit).put("cursor", cursor), long)
+        return r.optJSONArray("models").objects().map {
+            HubRepo(
+                it.optString("id"), it.optString("author"), it.optString("name"), it.optLong("downloads"), it.optLong("likes"), it.optString("updated"),
+                it.optBoolean("gated"), it.optInt("builds"), it.optJSONArray("quants").strings(), it.optString("task").takeIf { t -> t.isNotBlank() && t != "null" },
+            )
+        } to r.optString("next").takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    /** A repository's GGUF files, each with what it would cost on this computer at a [ctx] window. */
+    suspend fun hubModel(id: String, ctx: Int = 8192): HubModel {
+        val r = call("/api/v2/hub/model", JSONObject().put("id", id).put("ctx", ctx), long)
+        val hw = r.optJSONObject("hardware") ?: JSONObject()
+        return HubModel(
+            r.optString("id"), r.optInt("ctx"), hw.optLong("vram_total_mb"), hw.optLong("ram_total_mb"), hw.optBoolean("gpu"),
+            r.optJSONArray("files").objects().map {
+                HubFile(
+                    it.optString("path"), it.optString("quant"), it.optString("kind"), it.optBoolean("loadable"), it.optLong("download"),
+                    it.optLong("vram_needed"), it.optLong("ram_needed"), it.optString("verdict"), it.optBoolean("recommended"),
+                )
+            },
+        )
+    }
+
+    /**
+     * Starts a download on the computer. The service owns the transfer: this returns once it has
+     * started, and [downloads] follows it from then on.
+     */
+    suspend fun hubDownload(id: String, path: String, bytes: Long) = withContext(Dispatchers.IO) {
+        val c = long.newCall(request("/api/v2/hub/download").post(JSONObject().put("id", id).put("path", path).put("bytes", bytes).toString().toRequestBody(JSON)).build())
+        try {
+            c.execute().use { resp ->
+                if (!resp.isSuccessful) read(resp)
+                val source = resp.body?.source() ?: return@use
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val ev = runCatching { JSONObject(line.removePrefix("data:").trim()) }.getOrNull() ?: continue
+                    if (ev.has("error")) throw ImpulseError(ev.optString("error"))
+                    break
+                }
+            }
+        } catch (e: IOException) {
+            throw ImpulseError("Cannot reach Impulse at ${base.substringAfter("://")}.")
+        } finally {
+            c.cancel()
+        }
+    }
+
+    suspend fun downloads(): List<Download> = downloadList(call("/api/v2/hub/downloads"))
+
+    /** [action]: pause, resume, retry or cancel; [keepPart] keeps a cancelled one's partial file. */
+    suspend fun controlDownload(name: String, action: String, keepPart: Boolean = false): List<Download> =
+        downloadList(call("/api/v2/hub/downloads/control", JSONObject().put("name", name).put("action", action).put("keep_part", keepPart)))
+
+    private fun downloadList(o: JSONObject) = o.optJSONArray("downloads").objects().map {
+        Download(
+            it.optString("name"), it.optString("repo"), it.optLong("have"), it.optLong("total"), it.optLong("bytes_per_second"),
+            it.optLong("eta_seconds"), it.optString("state"), it.optString("error"), it.optDouble("percent", 0.0),
+        )
+    }
+
+    /** The computer's GPUs, memory and processor, as the panel's Hardware type describes them. */
+    suspend fun hardware(): JSONObject = call("/api/v2/hardware")
+
+    /** The profile's panel settings: each value is the JSON text the panel stored. */
     suspend fun prefs(): JSONObject = call("/api/v2/prefs").optJSONObject("prefs") ?: JSONObject()
 
-    suspend fun contexts(): List<Context> = call("/v1/velocity/contexts").optJSONArray("data").objects().map {
-        Context(it.getString("name"), it.optLong("addressable_tokens").takeIf { n -> n > 0 }, it.optInt("documents"))
+    /** Merges settings into the profile's: each value is JSON text, as the panel keeps it. */
+    suspend fun setPrefs(set: JSONObject) {
+        call("/api/v2/prefs", JSONObject().put("set", set))
+    }
+
+    /** Every memory, the chats' own (`chat-…`) included. */
+    suspend fun contexts(): List<Context> = call("/api/v2/contexts").optJSONArray("contexts").objects().map {
+        Context(
+            it.getString("name"), it.optLong("tokens", -1).takeIf { n -> n >= 0 && !it.isNull("tokens") }, it.optInt("documents"),
+            it.optInt("pages"), it.optLong("capacity", -1).takeIf { n -> n >= 0 },
+        )
+    }
+
+    /** Makes an empty memory of [maxTokens], or builds one from a [source] path on the computer. */
+    suspend fun createContext(name: String, maxTokens: Long? = null, source: String? = null): Boolean =
+        call("/api/v2/contexts/create", JSONObject().put("name", name).apply {
+            maxTokens?.let { put("max_tokens", it) }
+            source?.let { put("source", it) }
+        }).optBoolean("started")
+
+    /** Writes text into a memory: [actor]'s own (e.g. "chat:<id>") or the named [context]; made when new. */
+    suspend fun writeContext(text: String, label: String, actor: String? = null, context: String? = null): Written {
+        val r = call("/api/v2/contexts/write", JSONObject().put("text", text).put("label", label).apply {
+            actor?.let { put("actor", it) }
+            context?.let { put("context", it) }
+        }, long)
+        return Written(r.optString("context"), r.optLong("added"), r.optLong("total"), r.optLong("tokens", -1).takeIf { it >= 0 && !r.isNull("tokens") })
+    }
+
+    /** Gives a memory more room; returns the capacity the service set (capped at what it offers). */
+    suspend fun growContext(name: String, capacity: Long): Long =
+        call("/api/v2/contexts/grow", JSONObject().put("name", name).put("capacity", capacity)).optLong("capacity")
+
+    suspend fun removeContext(name: String) {
+        call("/api/v2/contexts/remove", JSONObject().put("name", name))
+    }
+
+    /** What a memory holds, newest first, and how many documents it has. */
+    suspend fun contextEntries(name: String, offset: Int = 0, limit: Int = 50): Pair<List<Entry>, Int> {
+        val r = call("/api/v2/contexts/entries", JSONObject().put("name", name).put("offset", offset).put("limit", limit))
+        return r.optJSONArray("entries").objects().map {
+            Entry(
+                it.optLong("at"), it.optString("actor"), it.optString("source"), it.optLong("bytes"), it.optLong("tokens", -1).takeIf { n -> n >= 0 && !it.isNull("tokens") },
+                it.optLong("position"), it.optString("preview"), it.optBoolean("truncated"),
+            )
+        } to r.optInt("documents")
+    }
+
+    /** Finds a phrase in a memory, with text around each place it occurs. */
+    suspend fun contextFind(name: String, query: String, limit: Int = 30): List<Hit> =
+        call("/api/v2/contexts/find", JSONObject().put("name", name).put("query", query).put("limit", limit), long).optJSONArray("hits").objects().map {
+            Hit(it.optLong("position"), it.optString("text"), it.optString("actor"), it.optLong("at"), it.optString("source"))
+        }
+
+    /** The memory being built now, or null. */
+    suspend fun building(): Building? = call("/api/v2/contexts/building").takeIf { it.has("name") }?.let {
+        Building(it.optString("name"), it.optString("stage"), it.optLong("done"), it.optLong("total"), it.optString("phase"), it.optLong("eta_seconds", -1).takeIf { n -> n >= 0 && !it.isNull("eta_seconds") })
+    }
+
+    suspend fun keepAwake(): KeepAwake = awake(call("/api/v2/keep-awake"))
+
+    /** [mode]: off, working or always. */
+    suspend fun setKeepAwake(mode: String): KeepAwake = awake(call("/api/v2/keep-awake", JSONObject().put("mode", mode)))
+
+    private fun awake(o: JSONObject) = KeepAwake(o.optString("mode", "off"), o.optBoolean("holding"), o.optString("reason"))
+
+    /** Phones and browsers signed in from outside the computer. */
+    suspend fun devices(): List<Device> = deviceList(call("/api/v2/phone"))
+
+    /** Signs out one device by [id], or every one with null. Returns the devices left. */
+    suspend fun signOutDevice(id: String?): List<Device> = deviceList(call("/api/v2/phone/devices/signout", JSONObject().apply { id?.let { put("id", it) } }))
+
+    private fun deviceList(o: JSONObject) = o.optJSONArray("devices").objects().map {
+        Device(
+            it.optString("id"), it.optString("name"), it.optBoolean("app"), it.optString("via"), it.optString("ip"),
+            it.optString("profile_name").takeIf { n -> n.isNotBlank() && n != "null" }, it.optLong("seen_ago"), it.optLong("signed_in_ago"),
+        )
+    }
+
+    /** Automatic backups on the computer: enabled, every (day/week), folder, keep, last_unix, last_file, last_error, next_unix, running. */
+    suspend fun backup(): JSONObject = call("/api/v2/backup/auto")
+
+    /** Changes the automatic backup: any of enabled, every, folder, keep. */
+    suspend fun setBackup(patch: JSONObject): JSONObject = call("/api/v2/backup/auto", patch)
+
+    /** Makes a backup on the computer now, into its backup folder. */
+    suspend fun backupNow(): Boolean = call("/api/v2/backup/auto/run", JSONObject()).optBoolean("started")
+
+    /** This build against the published one: current, update_available, latest {version, notes…}. */
+    suspend fun version(): JSONObject = call("/api/v2/version", client = long)
+
+    /** Restarts Impulse; it answers, then exits, so the next calls fail for a while. */
+    suspend fun restart() {
+        call("/api/v2/restart", JSONObject())
     }
 
     suspend fun pull(since: Long): JSONObject = call("/api/v2/chats/pull", JSONObject().put("since", since))
@@ -199,30 +455,30 @@ class Impulse(private val server: Server, private val token: String? = null) {
     /**
      * One turn on the panel's own endpoint: words, the model's thinking, the queue, the calls it
      * made when [tools] were offered, and the receipt at the end. [actor] is the chat's id, so each
-     * chat keeps its own memory; [store] answers from a named context. Cancelling the collector
-     * cancels the request.
+     * chat keeps its own memory; [store] answers from a named context; [options] carries the
+     * sampler (temperature, top_p, top_k, min_p, repeat_penalty, seed, stop, max_tokens); with
+     * [remember] false nothing of the turn is kept. Cancelling the collector cancels the request.
      */
     fun turn(
         messages: List<JSONObject>,
-        actor: String,
+        actor: String?,
         store: String?,
         effort: String?,
         images: List<String> = emptyList(),
         tools: JSONArray? = null,
-        temperature: Double? = null,
-        maxTokens: Int? = null,
+        options: JSONObject? = null,
+        remember: Boolean = true,
     ): Flow<Delta> = callbackFlow {
-        val body = JSONObject()
-            .put("messages", JSONArray(messages))
-            .put("actor", actor)
+        val body = JSONObject().put("messages", JSONArray(messages))
+        options?.keys()?.forEach { body.put(it, options.get(it)) }
+        if (actor != null) body.put("actor", actor)
         if (store != null) body.put("store", store)
         if (images.isNotEmpty()) body.put("images", JSONArray(images))
         if (tools != null && tools.length() > 0) body.put("tools", tools)
-        if (temperature != null) body.put("temperature", temperature)
-        if (maxTokens != null) body.put("max_tokens", maxTokens)
+        if (!remember) body.put("remember", false)
         when (effort) {
             null -> {}
-            "off" -> body.put("thinking", false)
+            "off" -> body.put("thinking", false).put("reasoning_effort", "none")
             else -> body.put("thinking", true).put("reasoning_effort", effort)
         }
         val c: Call = slow.newCall(request("/api/v2/chat").post(body.toString().toRequestBody(JSON)).build())
@@ -289,3 +545,5 @@ class Impulse(private val server: Server, private val token: String? = null) {
 }
 
 fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).mapNotNull { opt(it) as? String }

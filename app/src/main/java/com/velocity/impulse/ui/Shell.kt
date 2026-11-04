@@ -6,23 +6,40 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.ExperimentalTransitionApi
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.Transition
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.ui.components.Flight
+import com.velocity.impulse.ui.components.pressable
+import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.Motion
+import com.velocity.impulse.ui.theme.Radius
+import com.velocity.impulse.ui.theme.Tone
+import com.velocity.impulse.ui.theme.Type
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /** What can stand in front of the conversation: pages (Z2) and sheets (Z3). */
-enum class Surface(val page: Boolean) { Settings(true), Computer(true), Model(false), Context(false) }
+enum class Surface(val page: Boolean) { Settings(true), Computer(true), Models(true), Contexts(true), Model(false), Context(false) }
 
 object Chrome {
     val Side = 12.dp
@@ -30,6 +47,39 @@ object Chrome {
 
     /** The top island row below the status bar: 8 + 52 + 8. */
     val Top = 68.dp
+
+    /** Controls are capsules; icon buttons are circles. */
+    val Capsule = RoundedCornerShape(percent = 50)
+
+    /** A section's rows share one container; a rounded rectangle clips in hardware on every phone. */
+    val Group = RoundedCornerShape(Radius.Card)
+}
+
+/** A text button in the one control shape. */
+@Composable
+fun Pill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    ink: Color = Ink.One,
+    fill: Color = Tone.Raise,
+    enabled: Boolean = true,
+    height: Dp = 40.dp,
+) {
+    val pressed = when (fill) {
+        Color.Transparent -> Tone.Raise
+        Tone.Raise -> Tone.Press
+        else -> fill.copy(alpha = 0.82f)
+    }
+    Box(
+        modifier.height(height)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.45f }
+            .pressable(onClick, Chrome.Capsule, fill, pressed, depth = 0.94f, enabled = enabled, stretch = true)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(text, style = Type.Body.copy(color = ink, fontWeight = FontWeight.SemiBold), maxLines = 1)
+    }
 }
 
 /**
@@ -60,6 +110,12 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
     var pageOrigin by mutableStateOf("")
         private set
     var sheetOrigin by mutableStateOf("")
+        private set
+
+    /** Where the opening element sat, in root pixels, and its corner; null grows the page by shared bounds. */
+    var pageFrom by mutableStateOf<Rect?>(null)
+        private set
+    var pageCorner = 0f
         private set
 
     /** Bumps only when another chat or a new one takes the stage, never on send. */
@@ -106,16 +162,19 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
         closeDrawer()
     }
 
-    fun newChat(closeDrawer: Boolean = true) {
-        m.newChat()
+    fun newChat(closeDrawer: Boolean = true, temporary: Boolean = false) {
+        m.newChat(temporary)
         sceneDir = 1
         scene++
         if (closeDrawer) this.closeDrawer()
     }
 
-    fun open(s: Surface, origin: String) {
+    /** A page opened with [from] (the element's bounds in root pixels) grows out of it as one container. */
+    fun open(s: Surface, origin: String, from: Rect? = null, corner: Float = 0f) {
         if (s.page) {
             pageOrigin = origin
+            pageFrom = from
+            pageCorner = corner
             scope.launch { pages.animateTo(s) }
         } else {
             sheetOrigin = origin

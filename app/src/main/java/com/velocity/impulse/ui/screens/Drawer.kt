@@ -1,33 +1,11 @@
 package com.velocity.impulse.ui.screens
 
-import com.velocity.impulse.ui.components.IconBtn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntSize
-import com.velocity.impulse.R
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloat
@@ -40,6 +18,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -49,9 +29,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -62,7 +44,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -78,13 +64,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
@@ -93,36 +86,41 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import com.velocity.impulse.R
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Chat
+import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
+import com.velocity.impulse.ui.Pill
 import com.velocity.impulse.ui.Shell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.components.Avatar
-import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Feel
-import com.velocity.impulse.ui.components.Field
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
-import com.velocity.impulse.ui.components.MorphSource
-import com.velocity.impulse.ui.components.Variant
+import com.velocity.impulse.ui.components.IconBtn
+import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
-import com.velocity.impulse.ui.components.morph
-import com.velocity.impulse.ui.components.morphText
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.Motion
-import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
@@ -130,10 +128,8 @@ import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-private enum class Opt { New, Models, Contexts }
-
 private sealed class Entry(val key: String) {
-    class Option(val opt: Opt) : Entry("opt-" + opt.name.lowercase())
+    data object Options : Entry("options")
     class Header(val label: String) : Entry("h-$label")
     class Item(val chat: Chat) : Entry(chat.id)
     class Empty(val searching: Boolean) : Entry("empty")
@@ -145,6 +141,8 @@ private class Places {
     val rows = HashMap<String, LayoutCoordinates>()
     val titles = HashMap<String, LayoutCoordinates>()
 }
+
+private fun LayoutCoordinates?.rect(): Rect? = this?.takeIf { it.isAttached }?.boundsInRoot()
 
 private fun sections(chats: List<Chat>): List<Pair<String, List<Chat>>> {
     val z = java.time.ZoneId.systemDefault()
@@ -160,12 +158,12 @@ private fun sections(chats: List<Chat>): List<Pair<String, List<Chat>>> {
     ).filter { it.second.isNotEmpty() }
 }
 
-/** The open cascade: slot 0 (the top island) arrives first, each later slot a beat after, reversing on close. */
+/** The open cascade: slot 0 (the top islands) arrives first, each later slot a beat after, reversing on close. */
 private fun Modifier.cascade(shell: Shell, slot: () -> Int) = graphicsLayer {
     if (shell.calm) return@graphicsLayer
     val k = shell.drawer.value.coerceIn(0f, 1f)
-    val i = slot()
-    if (i !in 0..11) return@graphicsLayer
+    if (k >= 1f) return@graphicsLayer
+    val i = slot().coerceIn(0, 11)
     val local = ((k - 0.035f * i) / (1f - 0.035f * i)).coerceIn(0f, 1f)
     translationX = -(1f - local) * 28.dp.toPx()
     alpha = local
@@ -200,14 +198,14 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
 
     val hay = remember(m.chats) { lazy { m.chats.associate { c -> c.id to c.messages.joinToString(" ") { it.text } } } }
     val gone = pending.toList()
-    val entries = remember(m.chats, query, gone, m.current, Lang.pl) {
+    val entries = remember(m.chats, query, gone, Lang.pl) {
         val q = query.trim()
         val searching = q.isNotEmpty()
         val shown = m.chats.filter { c ->
             c.id !in gone && (!searching || c.title.contains(q, true) || hay.value[c.id]?.contains(q, true) == true)
         }
         buildList {
-            if (!searching) Opt.entries.forEach { add(Entry.Option(it)) }
+            if (!searching) add(Entry.Options)
             for ((label, chats) in sections(shown)) {
                 add(Entry.Header(label))
                 chats.forEach { add(Entry.Item(it)) }
@@ -231,10 +229,8 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
     }
     LaunchedEffect(Unit) {
         snapshotFlow { shell.drawer.targetValue }.collect {
-            if (it == 0f) {
-                focus.clearFocus()
-                commit()
-            }
+            if (it < 1f) focus.clearFocus()
+            if (it == 0f) commit()
         }
     }
     DisposableEffect(Unit) { onDispose { commit() } }
@@ -245,6 +241,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
     fun lift(c: Chat) {
         val root = places.root?.takeIf { it.isAttached } ?: return
         val row = places.rows[c.id]?.takeIf { it.isAttached } ?: return
+        focus.clearFocus()
         heldRect = root.localBoundingBoxOf(row)
         lifted = c
         held = c
@@ -263,7 +260,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
         drop()
     }
     LaunchedEffect(renaming) { if (renaming) nameFocus.requestFocus() }
-    LaunchedEffect(Unit) { snapshotFlow { shell.drawer.targetValue < 1f }.collect { if (it) drop() } }
+    LaunchedEffect(Unit) { snapshotFlow { shell.drawer.targetValue < 1f || shell.pages.targetState != null }.collect { if (it) drop() } }
     BackHandler(held != null) { drop() }
 
     Box(modifier.fillMaxSize().onPlaced { places.root = it }) {
@@ -271,21 +268,20 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
             Modifier.fillMaxSize().glassSource(haze),
             state = list,
             contentPadding = with(density) {
-                PaddingValues(start = 8.dp, end = 8.dp, top = topH.toDp() + 8.dp, bottom = bottomH.toDp() + 8.dp)
+                PaddingValues(start = 8.dp, end = 8.dp, top = topH.toDp() + 12.dp, bottom = bottomH.toDp() + 12.dp)
             },
-            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             itemsIndexed(entries, key = { _, e -> e.key }, contentType = { _, e -> e::class }) { i, e ->
                 val item = Modifier
                     .animateItem(
                         fadeInSpec = tween(Motion.M2),
-                        placementSpec = if (calm) null else spring(0.88f, 420f, IntOffset.VisibilityThreshold),
+                        placementSpec = if (calm) null else spring(1f, 500f, IntOffset.VisibilityThreshold),
                         fadeOutSpec = tween(Motion.M1),
                     )
                     .cascade(shell) { i - list.firstVisibleItemIndex + 1 }
                 when (e) {
-                    is Entry.Option -> OptionRow(m, e.opt, item)
-                    is Entry.Header -> BasicText(e.label, item.padding(start = 12.dp, top = 24.dp, bottom = 8.dp), style = Type.Label)
+                    Entry.Options -> Options(m, places, item.padding(bottom = 8.dp))
+                    is Entry.Header -> BasicText(e.label, item.padding(start = 16.dp, top = 20.dp, bottom = 6.dp), style = Type.Label)
                     is Entry.Item -> {
                         val c = e.chat
                         val current = c.id == m.current
@@ -295,16 +291,16 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                                 .pressable(
                                     {
                                         focus.clearFocus()
-                                        shell.openChat(c.id, c.title.ifBlank { tr("Chat", "Czat") }, places.titles[c.id]?.takeIf { it.isAttached }?.boundsInRoot())
+                                        shell.openChat(c.id, c.title.ifBlank { tr("Chat", "Czat") }, places.titles[c.id].rect())
                                     },
-                                    Shapes.ControlLg,
+                                    Chrome.Capsule,
                                     if (current) Tone.Panel else Color.Transparent,
                                     if (current) Tone.Raise else Tone.Panel,
                                     depth = 1f,
                                     feel = null,
                                     onLong = { lift(c) },
                                 )
-                                .padding(horizontal = 12.dp),
+                                .padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             ChatLine(
@@ -324,7 +320,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                 .onSizeChanged { topH = it.height }
                 .cascade(shell) { 0 }
                 .statusBarsPadding()
-                .padding(8.dp),
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -332,29 +328,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                 Spacer(Modifier.width(8.dp))
                 SettingsButton(haze)
             }
-            Row(
-                Modifier.fillMaxWidth().height(48.dp)
-                    .glass(haze, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Glyph.Search, Ink.Three, size = 18.dp)
-                Spacer(Modifier.width(10.dp))
-                androidx.compose.foundation.text.BasicTextField(
-                    query, { query = it },
-                    Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = Type.Body,
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(LocalAccent.current),
-                    decorationBox = { inner ->
-                        Box {
-                            if (query.isEmpty()) BasicText(tr("Search chats", "Szukaj w czatach"), style = Type.Body.copy(color = Ink.Four))
-                            inner()
-                        }
-                    },
-                )
-                if (query.isNotEmpty()) IconBtn(Glyph.Close, { query = "" }, tint = Ink.Three, fill = Color.Transparent, size = 32.dp)
-            }
+            SearchField(query, haze) { query = it }
         }
 
         Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { bottomH = it.height }.navigationBarsPadding())
@@ -362,19 +336,19 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
         AnimatedVisibility(
             pending.isNotEmpty(),
             Modifier.align(Alignment.BottomCenter)
-                .padding(bottom = with(density) { bottomH.toDp() })
+                .padding(bottom = with(density) { bottomH.toDp() } + 8.dp)
                 .padding(horizontal = 8.dp),
             enter = if (calm) fadeIn(tween(Motion.M1)) else
-                slideInVertically(spring(0.85f, 500f, IntOffset.VisibilityThreshold)) { with(density) { 24.dp.roundToPx() } } + fadeIn(tween(Motion.M1)),
+                slideInVertically(spring(1f, 500f, IntOffset.VisibilityThreshold)) { with(density) { 24.dp.roundToPx() } } + fadeIn(tween(Motion.M1)),
             exit = if (calm) fadeOut(tween(Motion.M1)) else
                 slideOutVertically(tween(Motion.M1)) { with(density) { 16.dp.roundToPx() } } + fadeOut(tween(Motion.M1)),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(52.dp).glass(haze, Shapes.Panel).padding(start = 16.dp, end = 8.dp),
+                Modifier.fillMaxWidth().height(52.dp).glass(haze, Chrome.Capsule).padding(start = 20.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicText(tr("Chat deleted", "Czat usunięty"), Modifier.weight(1f), style = Type.Body)
-                Btn(tr("Undo", "Cofnij"), { pending.clear() }, variant = Variant.Quiet, height = 36.dp)
+                Pill(tr("Undo", "Cofnij"), { pending.clear() }, ink = LocalAccent.current, fill = Color.Transparent)
             }
         }
 
@@ -407,9 +381,9 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
             val current = c.id == m.current
             Row(
                 Modifier.fillMaxSize()
-                    .shadow(12.dp, Shapes.ControlLg, ambientColor = Color.Black.copy(alpha = 0.4f))
-                    .background(Tone.Raise, Shapes.ControlLg)
-                    .padding(horizontal = 12.dp),
+                    .shadow(12.dp, Chrome.Capsule, ambientColor = Color.Black.copy(alpha = 0.4f))
+                    .background(Tone.Raise, Chrome.Capsule)
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!renaming) ChatLine(c, current)
@@ -434,7 +408,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                     val y = if (above) rect.top.roundToInt() - gap - actionsH else rect.bottom.roundToInt() + gap
                     IntOffset(rect.left.roundToInt(), y + rise())
                 }
-                .width(max(200.dp, w * 0.7f)),
+                .width(max(220.dp, w * 0.7f)),
             enter = if (calm) fadeIn(tween(Motion.M1)) else
                 scaleIn(spring(0.85f, 520f), 0.85f, TransformOrigin(0.1f, if (above) 1f else 0f)) + fadeIn(tween(Motion.M1)),
             exit = if (calm) fadeOut(tween(Motion.M1)) else
@@ -444,14 +418,14 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
             val island = this
             AnimatedContent(
                 renaming,
-                Modifier.fillMaxWidth().onSizeChanged { actionsH = it.height }.glass(haze, Shapes.Panel),
+                Modifier.fillMaxWidth().onSizeChanged { actionsH = it.height }.glass(haze, Chrome.Group),
                 transitionSpec = {
                     fadeIn(tween(Motion.M2, delayMillis = 60)) togetherWith fadeOut(tween(Motion.M1)) using
                         SizeTransform(clip = true) { _, _ -> spring(1f, 520f, IntSize.VisibilityThreshold) }
                 },
                 label = "actions",
             ) { naming ->
-                if (!naming) Column(Modifier.fillMaxWidth().padding(6.dp)) {
+                if (!naming) Column(Modifier.fillMaxWidth()) {
                     with(island) {
                         Action(0, painterResource(R.drawable.ph_pencil_simple_bold), tr("Rename", "Zmień nazwę"), Ink.One, calm) {
                             view.feel(Feel.Tap)
@@ -474,51 +448,77 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                             drop()
                         }
                     }
-                } else Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Btn(tr("Cancel", "Anuluj"), ::drop, Modifier.weight(1f), variant = Variant.Quiet, height = 44.dp)
-                    Btn(tr("Save", "Zapisz"), { rename(c) }, Modifier.weight(1f), variant = Variant.Primary, height = 44.dp, enabled = name.text.isNotBlank())
+                } else Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(tr("Cancel", "Anuluj"), ::drop, Modifier.weight(1f), height = 44.dp)
+                    Pill(tr("Save", "Zapisz"), { rename(c) }, Modifier.weight(1f), ink = OnAccent, fill = LocalAccent.current, enabled = name.text.isNotBlank(), height = 44.dp)
                 }
             }
         }
     }
 }
 
-/** You and where you are connected; it opens the computer page, the gear beside it opens Settings. */
+@Composable
+private fun SearchField(query: String, haze: HazeState, onChange: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(48.dp).glass(haze, Chrome.Capsule).padding(start = 16.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Glyph.Search, Ink.Three, size = 18.dp)
+        Spacer(Modifier.width(10.dp))
+        BasicTextField(
+            query, onChange,
+            Modifier.weight(1f),
+            singleLine = true,
+            textStyle = Type.Body.copy(color = Ink.One),
+            cursorBrush = SolidColor(LocalAccent.current),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) BasicText(tr("Search chats", "Szukaj w czatach"), style = Type.Body.copy(color = Ink.Four))
+                    inner()
+                }
+            },
+        )
+        if (query.isNotEmpty()) IconBtn(Glyph.Close, { onChange("") }, tint = Ink.Three, fill = Color.Transparent, size = 36.dp)
+    }
+}
+
+/** You and where you are connected; it grows into the computer page, the gear beside it into Settings. */
 @Composable
 private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
     val shell = LocalShell.current
-    MorphSource("drawer-computer", Surface.Computer, modifier) {
-        val me = m.me
-        val name = me?.name?.ifBlank { null } ?: "Impulse"
-        val offline = m.online == false
-        val dot = when (m.online) {
-            true -> Signal.Ok
-            false -> Signal.Err
-            null -> Ink.Four
-        }
-        Row(
-            Modifier.morph("drawer-computer", this, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
-                .glass(haze, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
-                .fillMaxWidth()
-                .height(56.dp)
-                .pressable({ shell.open(Surface.Computer, "drawer-computer") }, depth = 0.98f, feel = null)
-                .padding(start = 8.dp, end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Avatar(name, me?.avatar, me?.photo, 40.dp)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                BasicText(name, style = Type.Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).background(dot, CircleShape))
-                    Spacer(Modifier.width(6.dp))
-                    BasicText(
-                        if (offline) tr("Computer offline", "Komputer niedostępny") else linkLabel(m.link),
-                        style = Type.Meta,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val me = m.me
+    val name = me?.name?.ifBlank { null } ?: "Impulse"
+    val dot = when (m.online) {
+        true -> Signal.Ok
+        false -> Signal.Err
+        null -> Ink.Four
+    }
+    Row(
+        modifier.height(56.dp)
+            .onPlaced { at[0] = it }
+            .glass(haze, Chrome.Capsule)
+            .pressable(
+                { at[0].rect().let { shell.open(Surface.Computer, "drawer-computer", it, it?.height?.div(2) ?: 0f) } },
+                Chrome.Capsule, Color.Transparent, Tone.Raise.copy(alpha = 0.6f), depth = 1f, feel = Feel.Tap,
+            )
+            .padding(start = 8.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(name, me?.avatar, me?.photo, 40.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(name, style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).background(dot, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                BasicText(
+                    if (m.online == false) tr("Computer offline", "Komputer niedostępny") else linkLabel(m.link),
+                    style = Type.Meta.copy(color = Ink.Three),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -527,74 +527,75 @@ private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
 @Composable
 private fun SettingsButton(haze: HazeState) {
     val shell = LocalShell.current
-    MorphSource("drawer-settings", Surface.Settings) {
-        Box(
-            Modifier.morph("drawer-settings", this, CircleShape).size(56.dp).glass(haze, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            IconBtn(Glyph.Settings, { shell.open(Surface.Settings, "drawer-settings") }, tint = Ink.One, fill = Color.Transparent, size = 56.dp, island = true)
-        }
-    }
-}
-
-@Composable
-private fun OptionRow(m: AppModel, opt: Opt, modifier: Modifier) {
-    val shell = LocalShell.current
-    val view = LocalView.current
-    val accent = LocalAccent.current
-    when (opt) {
-        Opt.New -> OptionLine(modifier, Glyph.Plus, accent, accent.copy(alpha = 0.16f), tr("New chat", "Nowy czat"), null) {
-            view.feel(Feel.Tap)
-            shell.newChat()
-        }
-        Opt.Models -> MorphSource("drawer-models", Surface.Model, modifier) {
-            val detail = m.status?.model?.name ?: if (m.loading != null) tr("Loading…", "Wczytywanie…") else tr("None loaded", "Nie wczytano")
-            OptionLine(Modifier.morph("drawer-models", this, Shapes.ControlLg), Glyph.Models, Ink.Two, Tone.Raise, tr("Models", "Modele"), detail) {
-                shell.open(Surface.Model, "drawer-models")
-            }
-        }
-        Opt.Contexts -> MorphSource("drawer-contexts", Surface.Context, modifier) {
-            OptionLine(Modifier.morph("drawer-contexts", this, Shapes.ControlLg), Glyph.Contexts, Ink.Two, Tone.Raise, tr("Contexts", "Konteksty"), m.defaultContext ?: tr("None", "Brak")) {
-                shell.open(Surface.Context, "drawer-contexts")
-            }
-        }
-    }
-}
-
-/** [modifier] leads the chain so a morph wraps the press. */
-@Composable
-private fun OptionLine(modifier: Modifier, glyph: Glyph, ink: Color, tile: Color, title: String, detail: String?, onClick: () -> Unit) {
-    val shell = LocalShell.current
-    Row(
-        modifier.fillMaxWidth()
-            .height(48.dp)
-            .pressable(onClick, Shapes.ControlLg, Color.Transparent, Tone.Panel, depth = 1f, feel = null)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Tile(glyph, ink, tile)
-        Spacer(Modifier.width(12.dp))
-        BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1)
-        if (detail != null) BasicText(
-            detail,
-            Modifier.padding(start = 8.dp).widthIn(max = shell.drawerWidth * 0.45f),
-            style = Type.Meta.copy(color = Ink.Three),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    Box(Modifier.size(56.dp).onPlaced { at[0] = it }.glass(haze, CircleShape), contentAlignment = Alignment.Center) {
+        IconBtn(
+            Glyph.Settings,
+            { at[0].rect().let { shell.open(Surface.Settings, "drawer-settings", it, it?.height?.div(2) ?: 0f) } },
+            tint = Ink.One, fill = Color.Transparent, size = 56.dp, island = true,
         )
     }
 }
 
+/** New chat, models and contexts: one group, the pages growing out of their rows. */
 @Composable
-private fun Tile(glyph: Glyph, ink: Color, fill: Color) {
-    Box(Modifier.size(32.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
-        Icon(glyph, ink, size = 18.dp)
+private fun Options(m: AppModel, places: Places, modifier: Modifier) {
+    val shell = LocalShell.current
+    val view = LocalView.current
+    val accent = LocalAccent.current
+    Column(modifier.fillMaxWidth().clip(Chrome.Group), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        OptionLine(Glyph.Plus, accent, accent.copy(alpha = 0.16f), tr("New chat", "Nowy czat"), null, null) {
+            view.feel(Feel.Tap)
+            shell.newChat()
+        }
+        val model = m.status?.model?.name ?: if (m.loading != null) tr("Loading…", "Wczytywanie…") else tr("None loaded", "Nie wczytano")
+        OptionLine(Glyph.Models, Ink.Two, Tone.Raise, tr("Models", "Modele"), model, places) {
+            shell.open(Surface.Models, "drawer-models", places.rows["opt-models"].rect())
+        }
+        OptionLine(Glyph.Contexts, Ink.Two, Tone.Raise, tr("Contexts", "Konteksty"), m.defaultContext ?: tr("None", "Brak"), places) {
+            shell.open(Surface.Contexts, "drawer-contexts", places.rows["opt-contexts"].rect())
+        }
+    }
+}
+
+@Composable
+private fun OptionLine(glyph: Glyph, ink: Color, tile: Color, title: String, detail: String?, places: Places?, onClick: () -> Unit) {
+    val shell = LocalShell.current
+    val key = "opt-" + glyph.name.lowercase()
+    Row(
+        Modifier.fillMaxWidth()
+            .height(52.dp)
+            .then(if (places != null) Modifier.onPlaced { places.rows[key] = it } else Modifier)
+            .pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tap)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp).background(tile, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(glyph, ink, size = 18.dp)
+        }
+        Spacer(Modifier.width(12.dp))
+        BasicText(title, Modifier.weight(1f), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1)
+        if (detail != null) {
+            BasicText(
+                detail,
+                Modifier.padding(start = 8.dp).widthIn(max = shell.drawerWidth * 0.4f),
+                style = Type.Meta.copy(color = Ink.Three),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(4.dp))
+            Icon(Glyph.Right, Ink.Four, size = 14.dp)
+        }
     }
 }
 
 /** Never touches [Chat.messages]: it re-parses the JSON on every read. */
 @Composable
 private fun RowScope.ChatLine(c: Chat, current: Boolean, titleModifier: Modifier = Modifier) {
+    if (c.temporary) {
+        Icon(Glyph.EyeOff, Ink.Three, size = 14.dp)
+        Spacer(Modifier.width(6.dp))
+    }
     BasicText(
         c.title.ifBlank { tr("Chat", "Czat") },
         Modifier.weight(1f).then(titleModifier),
@@ -616,7 +617,7 @@ private fun EmptyNote(searching: Boolean, calm: Boolean, modifier: Modifier) {
         modifier.graphicsLayer {
             alpha = rise.value
             if (!calm) translationY = (1f - rise.value) * 6.dp.toPx()
-        }.padding(12.dp),
+        }.padding(16.dp),
         style = Type.Meta.copy(color = Ink.Three),
     )
 }
@@ -636,18 +637,18 @@ private fun AnimatedVisibilityScope.Action(
     ) { if (it == EnterExitState.Visible) 1f else 0f }
     Row(
         Modifier.fillMaxWidth()
-            .height(48.dp)
+            .height(50.dp)
             .graphicsLayer {
                 if (calm) return@graphicsLayer
                 alpha = p.value
                 translationY = (1f - p.value) * 6.dp.toPx()
             }
-            .pressable(onClick, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f, feel = null)
-            .padding(horizontal = 12.dp),
+            .pressable(onClick, RectangleShape, Color.Transparent, Tone.Raise, depth = 1f, feel = null)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Image(icon, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(tint))
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         BasicText(label, style = Type.Body.copy(color = tint, fontWeight = FontWeight.Medium))
     }
 }

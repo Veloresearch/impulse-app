@@ -55,12 +55,15 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Discovery
 import com.velocity.impulse.data.Found
@@ -76,8 +79,10 @@ import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.ImpulseMark
 import com.velocity.impulse.ui.components.Roll
+import com.velocity.impulse.ui.components.Sheet
 import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
+import com.velocity.impulse.ui.components.polite
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.components.shake
 import com.velocity.impulse.ui.theme.Ink
@@ -93,9 +98,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-private enum class From { Nearby, Scan, Typed }
-
-private val Headline = Type.Brand.copy(fontSize = 34.sp, lineHeight = 40.sp)
+private enum class From { Nearby, Scan, Typed, Link }
 
 @Composable
 fun ConnectScreen(m: AppModel) {
@@ -109,6 +112,19 @@ fun ConnectScreen(m: AppModel) {
     val found = remember { mutableStateListOf<Found>() }
     var looking by remember { mutableStateOf(true) }
     var round by remember { mutableIntStateOf(0) }
+    // A connect this screen did not start came from an impulse://connect link. Work already
+    // running when the screen arrived belongs to the screen before it.
+    var mine by remember { mutableStateOf(false) }
+    val was = remember { booleanArrayOf(m.busy) }
+    LaunchedEffect(m.busy) {
+        val rose = m.busy && !was[0]
+        was[0] = m.busy
+        if (rose && !mine) {
+            from = From.Link
+            open = null
+        }
+        if (!m.busy) mine = false
+    }
     LaunchedEffect(round) {
         looking = true
         withTimeoutOrNull(12_000) {
@@ -123,6 +139,7 @@ fun ConnectScreen(m: AppModel) {
     }
     fun connect(raw: String, how: From) {
         if (m.busy) return
+        mine = true
         from = how
         m.connect(raw)
     }
@@ -140,6 +157,17 @@ fun ConnectScreen(m: AppModel) {
             tr("Impulse runs there. This app talks to it.", "Impulse działa na komputerze. Ta aplikacja z nim rozmawia."),
             rise,
         )
+
+        AnimatedVisibility(
+            from == From.Link && (m.busy || m.error != null),
+            enter = expandVertically(Motion.travel(), Alignment.Top) + fadeIn(tween(Motion.M2, delayMillis = 40)),
+            exit = shrinkVertically(Motion.settle(), Alignment.Top) + fadeOut(tween(Motion.M1)),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.S3)) {
+                LinkCard(m.busy)
+                Problem(m.error)
+            }
+        }
 
         Column(rise(3), verticalArrangement = Arrangement.spacedBy(Space.S3)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +246,7 @@ fun ConnectScreen(m: AppModel) {
                     )
                 }
             }
-            Problem(m.error.takeIf { from != From.Nearby })
+            Problem(m.error.takeIf { from == From.Scan || from == From.Typed })
         }
 
         Column(rise(5), verticalArrangement = Arrangement.spacedBy(Space.S3)) {
@@ -262,7 +290,7 @@ private fun Head(title: String, line: String, rise: (Int) -> Modifier) {
     Column(Modifier.fillMaxWidth()) {
         ImpulseMark(Modifier.size(30.dp).then(rise(0)))
         Spacer(Modifier.height(Space.S5))
-        BasicText(title, rise(1), style = Headline)
+        BasicText(title, rise(1).semantics { heading() }, style = Type.BrandHero)
         Spacer(Modifier.height(Space.S2))
         BasicText(line, rise(2), style = Type.Body.copy(color = Ink.Three))
     }
@@ -276,6 +304,19 @@ private fun Label(text: String, modifier: Modifier = Modifier) =
 private fun Tile(glyph: Glyph, size: Int = 40) {
     Box(Modifier.size(size.dp).background(Tone.Raise, Shapes.ControlLg), contentAlignment = Alignment.Center) {
         Icon(glyph, Ink.Two, size = (size * 0.48f).dp)
+    }
+}
+
+@Composable
+private fun LinkCard(busy: Boolean) {
+    Row(Modifier.fillMaxWidth().island().padding(Space.S4), verticalAlignment = Alignment.CenterVertically) {
+        Tile(Glyph.Link)
+        Spacer(Modifier.width(Space.S3))
+        Column(Modifier.weight(1f)) {
+            BasicText(tr("Opening the link", "Otwieram link"), style = Type.Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1)
+            Roll(if (busy) tr("Connecting…", "Łączenie…") else tr("It didn't connect", "Nie udało się połączyć"), Type.Meta, Modifier.polite())
+        }
+        if (busy) Spinner(LocalAccent.current)
     }
 }
 
@@ -355,7 +396,10 @@ private fun Fold(
     val turn = animateFloatAsState(if (open) 180f else 0f, Motion.calmText(), label = "turn")
     Column(Modifier.fillMaxWidth().island()) {
         Row(
-            Modifier.fillMaxWidth().pressable(onToggle, depth = 1f, feel = Feel.Tick).padding(Space.S4),
+            Modifier.fillMaxWidth()
+                .semantics { stateDescription = if (open) tr("Open", "Otwarte") else tr("Closed", "Zamknięte") }
+                .pressable(onToggle, depth = 1f, feel = Feel.Tick)
+                .padding(Space.S4),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Tile(glyph)
@@ -409,64 +453,151 @@ fun SignInScreen(m: AppModel) {
     }
     val host = m.server?.base?.substringAfter("://").orEmpty()
 
-    Column(
-        Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Space.S5),
-        verticalArrangement = Arrangement.spacedBy(Space.S6),
-    ) {
-        Spacer(Modifier.height(Space.S5))
-        Head(
-            tr("Sign in", "Zaloguj się"),
-            tr("Choose your profile on $host · ${linkLabel(m.link)}", "Wybierz profil na $host · ${linkLabel(m.link)}"),
-            rise,
-        )
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Space.S5),
+            verticalArrangement = Arrangement.spacedBy(Space.S6),
+        ) {
+            Spacer(Modifier.height(Space.S5))
+            Head(
+                tr("Sign in", "Zaloguj się"),
+                tr("Choose your profile on $host · ${linkLabel(m.link)}", "Wybierz profil na $host · ${linkLabel(m.link)}"),
+                rise,
+            )
 
-        if (usable.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(Space.S3)) {
-            usable.forEachIndexed { i, p ->
-                key(p.id) {
-                    ProfileCard(
-                        p, chosen == p.id, chosen != null && chosen != p.id, rise(3 + i),
-                        {
-                            chosen = if (chosen == p.id) null else p.id
-                            password = ""
-                        },
-                    ) {
-                        val focus = remember { FocusRequester() }
-                        LaunchedEffect(Unit) {
-                            delay(280)
-                            focus.requestFocus()
+            if (m.profiles.isEmpty()) Profiles(m.busy, rise(3)) { m.loadProfiles() }
+
+            if (usable.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(Space.S3)) {
+                usable.forEachIndexed { i, p ->
+                    key(p.id) {
+                        ProfileCard(
+                            p, chosen == p.id, chosen != null && chosen != p.id, rise(3 + i),
+                            {
+                                chosen = if (chosen == p.id) null else p.id
+                                password = ""
+                            },
+                        ) {
+                            val focus = remember { FocusRequester() }
+                            LaunchedEffect(Unit) {
+                                delay(280)
+                                focus.requestFocus()
+                            }
+                            Field(
+                                password, { password = it }, tr("Password", "Hasło"), Modifier.focusRequester(focus).shake(shakes),
+                                secret = true, keyboard = KeyboardType.Password, action = ImeAction.Go,
+                                onAction = { if (password.isNotEmpty() && !m.busy) m.signIn(p, password) },
+                            )
+                            Btn(
+                                if (m.busy) tr("Signing in…", "Logowanie…") else tr("Sign in", "Zaloguj"), { m.signIn(p, password) },
+                                Modifier.fillMaxWidth(), Variant.Primary, enabled = password.isNotEmpty() && !m.busy,
+                            )
+                            Problem(m.error)
                         }
-                        Field(
-                            password, { password = it }, tr("Password", "Hasło"), Modifier.focusRequester(focus).shake(shakes),
-                            secret = true, keyboard = KeyboardType.Password, action = ImeAction.Go,
-                            onAction = { if (password.isNotEmpty() && !m.busy) m.signIn(p, password) },
-                        )
-                        Btn(
-                            if (m.busy) tr("Signing in…", "Logowanie…") else tr("Sign in", "Zaloguj"), { m.signIn(p, password) },
-                            Modifier.fillMaxWidth(), Variant.Primary, enabled = password.isNotEmpty() && !m.busy,
-                        )
-                        Problem(m.error)
                     }
                 }
             }
-        }
 
-        if (locked.isNotEmpty()) {
-            val start = 3 + usable.size
-            Column(rise(start), verticalArrangement = Arrangement.spacedBy(Space.S3)) {
-                Label(tr("Can't be opened from a phone", "Niedostępne z telefonu"))
-                if (usable.isEmpty()) {
-                    Hint(tr("In Impulse, open Settings › Profiles, give your profile a password and allow other devices.", "W Impulse otwórz Ustawienia › Profile, ustaw hasło i zezwól na inne urządzenia."))
+            if (locked.isNotEmpty()) {
+                val start = 3 + usable.size
+                Column(rise(start), verticalArrangement = Arrangement.spacedBy(Space.S3)) {
+                    Label(tr("Can't be opened from a phone", "Niedostępne z telefonu"))
+                    if (usable.isEmpty()) {
+                        Hint(tr("In Impulse, open Settings › Profiles, give your profile a password and allow other devices.", "W Impulse otwórz Ustawienia › Profile, ustaw hasło i zezwól na inne urządzenia."))
+                    }
+                    locked.forEach { p -> key(p.id) { LockedRow(p) } }
                 }
-                locked.forEach { p -> key(p.id) { LockedRow(p) } }
+            }
+            if (chosen == null) Problem(m.error)
+
+            Btn(
+                tr("Use another computer", "Użyj innego komputera"), { m.forgetServer() },
+                Modifier.align(Alignment.CenterHorizontally).then(rise(4 + m.profiles.size)), Variant.Quiet, height = 40.dp,
+            )
+            Spacer(Modifier.height(Space.S5))
+        }
+        SwitchComputer(m)
+    }
+}
+
+/**
+ * Asks before following an `impulse://connect` link that arrived while this phone already uses a
+ * computer. Hosted by the sign-in screen and, signed in, by the app's top level.
+ */
+@Composable
+fun SwitchComputer(m: AppModel) {
+    val link = m.connectLink
+    var last by remember { mutableStateOf("") }
+    if (link != null) last = link
+    val base = remember(last) { runCatching { Server.parse(last).base }.getOrNull() }
+    Sheet(link != null, m::dropConnectLink) {
+        Column(Modifier.padding(top = Space.S2), verticalArrangement = Arrangement.spacedBy(Space.S2)) {
+            BasicText(tr("Switch to this computer?", "Przełączyć na ten komputer?"), Modifier.semantics { heading() }, style = Type.Title)
+            if (base != null) {
+                val way = Link.of(base)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = Space.S2).background(Tone.Raise, Shapes.Card).padding(Space.S3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Tile(linkGlyph(way), 36)
+                    Spacer(Modifier.width(Space.S3))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(base.substringAfter("://").trimEnd('/'), style = Type.Mono.copy(color = Ink.One), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        BasicText(linkLabel(way), style = Type.Meta)
+                    }
+                }
+                BasicText(
+                    tr("You'll choose a profile and sign in there. Chats stay on each computer.", "Wybierzesz profil i zalogujesz się tam. Czaty zostają na każdym komputerze."),
+                    style = Type.Body.copy(color = Ink.Three),
+                )
+                Problem(m.error)
+                Spacer(Modifier.height(Space.S2))
+                Btn(
+                    if (m.busy) tr("Connecting…", "Łączenie…") else tr("Switch", "Przełącz"), { m.connect(last) },
+                    Modifier.fillMaxWidth(), Variant.Primary, enabled = !m.busy,
+                )
+                Btn(tr("Not now", "Nie teraz"), m::dropConnectLink, Modifier.fillMaxWidth(), Variant.Quiet)
+            } else {
+                BasicText(
+                    tr("This link has no computer address in it.", "Ten link nie zawiera adresu komputera."),
+                    style = Type.Body.copy(color = Ink.Three),
+                )
+                Spacer(Modifier.height(Space.S2))
+                Btn(tr("Close", "Zamknij"), m::dropConnectLink, Modifier.fillMaxWidth(), Variant.Quiet)
             }
         }
-        if (chosen == null) Problem(m.error)
+    }
+}
 
-        Btn(
-            tr("Use another computer", "Użyj innego komputera"), { m.forgetServer() },
-            Modifier.align(Alignment.CenterHorizontally).then(rise(4 + m.profiles.size)), Variant.Quiet, height = 40.dp,
-        )
-        Spacer(Modifier.height(Space.S5))
+private fun linkGlyph(l: Link) = when (l) {
+    Link.Local -> Glyph.Wifi
+    Link.Tailscale -> Glyph.Shield
+    Link.Cloudflare -> Glyph.Cloud
+    Link.Secure -> Glyph.Lock
+    Link.Remote -> Glyph.Globe
+}
+
+/** Stands in for the profiles while they load; after a miss, a tap asks again. */
+@Composable
+private fun Profiles(loading: Boolean, modifier: Modifier, onAgain: () -> Unit) {
+    Row(
+        modifier.fillMaxWidth().clip(Shapes.Card).background(Tone.Panel.copy(alpha = 0.55f))
+            .then(if (loading) Modifier else Modifier.pressable(onAgain, depth = 0.98f, feel = Feel.Tick))
+            .padding(Space.S4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Roll(
+                if (loading) tr("Looking for profiles", "Szukam profili") else tr("No profiles came back", "Nie przyszły żadne profile"),
+                Type.Body.copy(color = Ink.Two, fontWeight = FontWeight.Medium),
+            )
+            Roll(
+                if (loading) tr("Asking the computer who uses it.", "Pytam komputer, kto go używa.")
+                else tr("Check that Impulse is open, then tap to ask again.", "Sprawdź, czy Impulse jest otwarty, i stuknij, by zapytać ponownie."),
+                Type.Meta,
+                maxLines = 3,
+            )
+        }
+        if (loading) Spinner(LocalAccent.current)
     }
 }
 
@@ -484,6 +615,7 @@ private fun ProfileCard(
     val dim = animateFloatAsState(if (dimmed) 1f else 0f, tween(Motion.M3, easing = Motion.Standard), label = "dim")
     Column(
         modifier.fillMaxWidth()
+            .semantics { this.selected = selected }
             .graphicsLayer {
                 val k = lift.value
                 shape = Shapes.Card
@@ -523,7 +655,8 @@ private fun ProfileCard(
 @Composable
 private fun LockedRow(p: Profile) {
     Row(
-        Modifier.fillMaxWidth().background(Tone.Panel.copy(alpha = 0.55f), Shapes.Card).padding(horizontal = Space.S4, vertical = Space.S3),
+        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
+            .background(Tone.Panel.copy(alpha = 0.55f), Shapes.Card).padding(horizontal = Space.S4, vertical = Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(p.name, p.avatar, p.photo, 36.dp, Modifier.graphicsLayer { alpha = 0.7f })
@@ -575,7 +708,7 @@ fun Problem(message: String?) {
         enter = expandVertically(Motion.travel(), Alignment.Top) + fadeIn(tween(Motion.M2, delayMillis = 40)),
         exit = shrinkVertically(Motion.settle(), Alignment.Top) + fadeOut(tween(Motion.M1)),
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.S1, vertical = Space.S1), verticalAlignment = Alignment.Top) {
+        Row(Modifier.fillMaxWidth().polite().padding(horizontal = Space.S1, vertical = Space.S1), verticalAlignment = Alignment.Top) {
             Icon(Glyph.Alert, Signal.Err, Modifier.padding(top = 2.dp), size = 14.dp)
             Spacer(Modifier.width(Space.S2))
             BasicText(last, style = Type.Meta.copy(color = Signal.Err))

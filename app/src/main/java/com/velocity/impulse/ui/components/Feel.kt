@@ -15,6 +15,10 @@ import android.view.HapticFeedbackConstants.TOGGLE_OFF
 import android.view.HapticFeedbackConstants.TOGGLE_ON
 import android.view.HapticFeedbackConstants.VIRTUAL_KEY
 import android.view.View
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 
 /** The haptic vocabulary, with the closest constant for Android 14+, 11+ and older phones. */
 enum class Feel(val v34: Int, val v30: Int, val base: Int) {
@@ -52,3 +56,12 @@ fun View.feel(f: Feel) {
         },
     )
 }
+
+/** TalkBack reads [text] once without moving focus: a finished answer, a toast. */
+@Suppress("DEPRECATION") // The live-region replacement re-reads a streaming answer on every token.
+fun View.announce(text: String) {
+    if (text.isNotBlank()) announceForAccessibility(text)
+}
+
+/** TalkBack reads this element again whenever its text changes, after what it is saying now. */
+fun Modifier.polite(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }

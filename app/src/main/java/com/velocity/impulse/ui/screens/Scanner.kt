@@ -60,6 +60,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -77,6 +79,7 @@ import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
+import com.velocity.impulse.ui.components.polite
 import com.velocity.impulse.ui.components.shake
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -142,7 +145,11 @@ fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier, shape: S
     }
 
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(0.92f).clip(shape).background(Tone.Inset), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(0.92f).clip(shape).background(Tone.Inset)
+                .semantics { contentDescription = tr("Camera, looking for the code", "Aparat szuka kodu") },
+            contentAlignment = Alignment.Center,
+        ) {
             if (allowed && awake) {
                 Box(Modifier.fillMaxSize().graphicsLayer { alpha = live }) {
                     Camera(
@@ -173,7 +180,7 @@ fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier, shape: S
                 else -> tr("Hold the phone over the code", "Skieruj telefon na kod")
             },
             Type.Meta,
-            Modifier.padding(bottom = Space.S1),
+            Modifier.padding(bottom = Space.S1).polite(),
         )
     }
 }

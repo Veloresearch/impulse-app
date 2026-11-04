@@ -1,6 +1,5 @@
 package com.velocity.impulse.ui
 
-import com.velocity.impulse.ui.screens.Details
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
@@ -61,8 +60,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -76,6 +82,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.zIndex
@@ -96,18 +103,24 @@ import com.velocity.impulse.ui.components.rubber
 import com.velocity.impulse.ui.screens.ComputerPage
 import com.velocity.impulse.ui.screens.ConnectScreen
 import com.velocity.impulse.ui.screens.ContextSheetBody
+import com.velocity.impulse.ui.screens.ContextsPage
 import com.velocity.impulse.ui.screens.Conversation
+import com.velocity.impulse.ui.screens.Details
 import com.velocity.impulse.ui.screens.Drawer
 import com.velocity.impulse.ui.screens.ModelSheetBody
+import com.velocity.impulse.ui.screens.ModelsPage
 import com.velocity.impulse.ui.screens.PreviewHost
 import com.velocity.impulse.ui.screens.SettingsPage
 import com.velocity.impulse.ui.screens.SignInScreen
+import com.velocity.impulse.ui.screens.SwitchComputer
 import com.velocity.impulse.ui.screens.TopIsland
+import com.velocity.impulse.ui.screens.VoiceHost
+import com.velocity.impulse.ui.theme.FollowTheme
+import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Radius
-import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import com.velocity.impulse.ui.theme.accentOf
@@ -125,14 +138,15 @@ fun App(m: AppModel) {
     val view = LocalView.current
     val base = LocalDensity.current
     SideEffect { Feel.enabled = m.haptics }
-    LaunchedEffect(m, view) { snapshotFlow { m.keepAwake && m.streaming }.collect { view.keepScreenOn = it } }
+    LaunchedEffect(m, view) { snapshotFlow { m.keepAwake && m.writing }.collect { view.keepScreenOn = it } }
     DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
     CompositionLocalProvider(
         LocalAccent provides accentOf(m.accent),
-        LocalReduceMotion provides m.reduceMotion,
+        LocalReduceMotion provides m.calm,
         LocalDensity provides Density(base.density, base.fontScale * m.textScale),
     ) {
-        var intro by rememberSaveable { mutableStateOf(!m.reduceMotion) }
+        FollowTheme(m.theme)
+        var intro by rememberSaveable { mutableStateOf(m.showIntro && !m.calm) }
         var handed by rememberSaveable { mutableStateOf(!intro) }
         val reveal = remember { Animatable(if (handed) 1f else 0f) }
         LaunchedEffect(handed) { if (handed) reveal.animateTo(1f, tween(650, easing = Motion.Out)) }
@@ -203,13 +217,17 @@ private fun Main(m: AppModel) {
                 } else {
                     Phone(m, shell, depth)
                 }
-                PageHost(Surface.Settings) { s, scroll -> SettingsPage(m, s, scroll) }
-                PageHost(Surface.Computer) { s, scroll -> ComputerPage(m, s, scroll) }
+                PageHost(Surface.Settings, tr("Settings", "Ustawienia")) { s, scroll -> SettingsPage(m, s, scroll) }
+                PageHost(Surface.Computer, tr("Computer", "Komputer")) { s, scroll -> ComputerPage(m, s, scroll) }
+                PageHost(Surface.Models, tr("Models", "Modele")) { _, _ -> ModelsPage(m) }
+                PageHost(Surface.Contexts, tr("Contexts", "Konteksty")) { _, _ -> ContextsPage(m) }
                 MorphSheet(Surface.Model) { ModelSheetBody(m) }
                 MorphSheet(Surface.Context) { ContextSheetBody(m) }
+                VoiceHost(m)
                 FlightOverlay(shell.flight)
                 Backs(shell)
                 PreviewHost()
+                SwitchComputer(m)
             }
         }
     }
@@ -391,44 +409,98 @@ private fun Modifier.recede(shell: Shell, amount: () -> Float) = graphicsLayer {
     if (p > 0f) drawRect(Color.Black, alpha = 0.4f * p)
 }
 
-/** A page (Z2) growing out of the drawer row that opened it, with a frosted back island. */
+/**
+ * A page (Z2). Opened with the bounds of the element that asked for it, it grows out of that
+ * element as one opaque container: position, size and corner on one spring, the page's own
+ * content fading in once the box is big enough to hold it, all in the layer so nothing is laid
+ * out again. Without bounds it falls back to the shared-bounds morph of its MorphSource.
+ */
 @OptIn(ExperimentalAnimationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
-private fun PageHost(surface: Surface, content: @Composable (AnimatedVisibilityScope, ScrollState) -> Unit) {
+private fun PageHost(surface: Surface, title: String, content: @Composable (AnimatedVisibilityScope, ScrollState) -> Unit) {
     val shell = LocalShell.current
     val calm = shell.calm
     val reach = with(LocalDensity.current) { 64.dp.toPx() }
-    shell.pageTransition.AnimatedVisibility(
-        { it == surface },
-        enter = if (calm) fadeIn(tween(Motion.M2)) else EnterTransition.None,
-        exit = if (calm) fadeOut(tween(Motion.M2)) else ExitTransition.None,
-    ) {
+    val open = shell.pageTransition.animateFloat({ Motion.morph() }, "open-${surface.name}") { if (it == surface) 1f else 0f }
+    shell.pageTransition.AnimatedVisibility({ it == surface }, enter = EnterTransition.None, exit = ExitTransition.None) {
         val page = this
-        Box(Modifier.fillMaxSize().morph(shell.pageOrigin, page, Shapes.Sheet).background(Tone.App).morphBody()) {
-            val haze = remember { HazeState() }
-            val scroll = rememberScrollState()
-            val titled by remember { derivedStateOf { scroll.value > reach } }
-            Box(Modifier.fillMaxSize().glassSource(haze)) { content(page, scroll) }
-            Row(Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).height(44.dp)) {
-                Box(Modifier.size(44.dp).glass(haze, CircleShape)) {
-                    IconBtn(Glyph.Left, { shell.close(surface) }, fill = Color.Transparent, size = 44.dp, island = true)
-                }
-            }
-            AnimatedVisibility(
-                titled,
-                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(vertical = 8.dp),
-                enter = fadeIn(tween(Motion.M1)),
-                exit = fadeOut(tween(Motion.M1)),
+        val from = shell.pageFrom
+        val shared = from == null && !calm
+        val frame = if (shared) Modifier.morph(shell.pageOrigin, page, RectangleShape) else Modifier.grow(from ?: Rect.Zero, shell.pageCorner, calm) { open.value }
+        Box(
+            Modifier.fillMaxSize().then(frame).background(Tone.App)
+                .then(if (shared) Modifier.morphBody() else Modifier)
+                .pointerInput(Unit) { detectTapGestures { } },
+        ) {
+            Box(
+                Modifier.fillMaxSize().graphicsLayer {
+                    if (shared || calm) return@graphicsLayer
+                    alpha = ((open.value - 0.18f) / 0.42f).coerceIn(0f, 1f)
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                },
             ) {
-                Box(Modifier.height(44.dp).glass(haze, Shapes.Card).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                    BasicText(
-                        if (surface == Surface.Settings) tr("Settings", "Ustawienia") else tr("Computer", "Komputer"),
-                        style = Type.Section,
-                    )
+                val haze = remember { HazeState() }
+                val scroll = rememberScrollState()
+                val titled by remember { derivedStateOf { scroll.value > reach } }
+                Box(Modifier.fillMaxSize().glassSource(haze)) { content(page, scroll) }
+                Box(Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).size(44.dp).glass(haze, CircleShape)) {
+                    IconBtn(Glyph.Left, { shell.close(surface) }, tint = Ink.One, fill = Color.Transparent, size = 44.dp, island = true)
+                }
+                AnimatedVisibility(
+                    titled,
+                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(vertical = 8.dp),
+                    enter = fadeIn(tween(Motion.M1)),
+                    exit = fadeOut(tween(Motion.M1)),
+                ) {
+                    Box(Modifier.height(44.dp).glass(haze, Chrome.Capsule).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+                        BasicText(title, style = Type.Section)
+                    }
                 }
             }
         }
     }
+}
+
+/** The page's visible window while it flies: a rounded box that travels from [from] to the whole screen. */
+private data class Window(val height: Float, val radius: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rounded(RoundRect(0f, 0f, size.width, height.coerceAtMost(size.height), CornerRadius(radius)))
+}
+
+private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+/**
+ * The container transform in one layer. The page keeps its full size and is scaled to the box's
+ * width; the box starts where the receding plane has carried the source, so the two stay on top
+ * of each other the whole way, and the corner rounds into a sheet before squaring into the screen.
+ */
+private fun Modifier.grow(from: Rect, corner: Float, calm: Boolean, progress: () -> Float) = graphicsLayer {
+    val t = progress().coerceIn(0f, 1f)
+    if (calm) {
+        alpha = t
+        return@graphicsLayer
+    }
+    if (t >= 1f) return@graphicsLayer
+    val w = size.width
+    val h = size.height
+    val k = 1f - 0.06f * t
+    val l = lerp(w / 2 + (from.left - w / 2) * k, 0f, t)
+    val top = lerp(h / 2 + (from.top - h / 2) * k, 0f, t)
+    val r = lerp(w / 2 + (from.right - w / 2) * k, w, t)
+    val b = lerp(h / 2 + (from.bottom - h / 2) * k, h, t)
+    val s = ((r - l) / w).coerceAtLeast(0.01f)
+    val sheet = Radius.Sheet.toPx()
+    val round = (if (t < 0.5f) lerp(corner, sheet, t * 2) else sheet * (1f - t) * 2).coerceAtMost(minOf(r - l, b - top) / 2)
+    transformOrigin = TransformOrigin(0f, 0f)
+    scaleX = s
+    scaleY = s
+    translationX = l
+    translationY = top
+    shape = Window((b - top) / s, round / s)
+    clip = true
+    shadowElevation = 16.dp.toPx() * 4f * t * (1f - t)
+    alpha = (t / 0.08f).coerceIn(0f, 1f)
+    compositingStrategy = CompositingStrategy.ModulateAlpha
 }
 
 /**

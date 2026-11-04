@@ -2,6 +2,7 @@ package com.velocity.impulse.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -9,10 +10,12 @@ import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -56,7 +59,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -67,7 +69,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -75,8 +76,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -92,20 +95,23 @@ import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Chat
 import com.velocity.impulse.data.Persona
 import com.velocity.impulse.data.Personas
+import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
+import com.velocity.impulse.ui.Pill
 import com.velocity.impulse.ui.Shell
 import com.velocity.impulse.ui.Surface
-import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.ModelFace
+import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
 import com.velocity.impulse.ui.components.Toggle
-import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
+import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -121,9 +127,6 @@ import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private val TitleStyle = Type.BrandTitle
-private val StatStyle = Type.brand(26.sp)
-
 /** Answer length presets, as max_tokens; null leaves it to the computer. */
 private val Lengths = listOf<Int?>(null, 1024, 4096, 8192, 16384)
 
@@ -131,6 +134,7 @@ private val Lengths = listOf<Int?>(null, 1024, 4096, 8192, 16384)
 private fun Modifier.arrive(shell: Shell, slot: Int) = graphicsLayer {
     if (shell.calm) return@graphicsLayer
     val k = (-shell.drawer.value).coerceIn(0f, 1f)
+    if (k >= 1f) return@graphicsLayer
     val i = slot.coerceIn(0, 11)
     val p = ((k - 0.035f * i) / (1f - 0.035f * i)).coerceIn(0f, 1f)
     translationX = (1f - p) * 40.dp.toPx()
@@ -139,7 +143,7 @@ private fun Modifier.arrive(shell: Shell, slot: Int) = graphicsLayer {
 }
 
 /** What the panel shows about a chat, read once per version of it rather than on every frame. */
-private class Facts(val asked: Int, val receipt: JSONObject?, val files: List<JSONObject>)
+private class Facts(val asked: Int, val receipt: JSONObject?, val files: List<JSONObject>, val window: Int)
 
 private fun factsOf(c: Chat): Facts {
     val msgs = c.messages
@@ -147,12 +151,14 @@ private fun factsOf(c: Chat): Facts {
         msgs.count { it.role == "user" },
         msgs.lastOrNull { it.role == "assistant" && it.receipt != null }?.receipt,
         msgs.flatMap { msg -> msg.raw.optJSONArray("files")?.let { a -> (0 until a.length()).mapNotNull(a::optJSONObject) }.orEmpty() },
+        msgs.lastOrNull { it.meta != null }?.meta?.optInt("window") ?: 0,
     )
 }
 
 /**
  * The right side of the room: everything about the chat in front of you. Its name, how the last
- * answer ran, what was sent in it, how it answers, and pinning, copying or deleting it.
+ * answer ran, what the chat keeps in memory, what was sent in it, how it answers, and pinning,
+ * copying, exporting or deleting it.
  */
 @Composable
 fun Details(m: AppModel, modifier: Modifier = Modifier) {
@@ -166,13 +172,18 @@ fun Details(m: AppModel, modifier: Modifier = Modifier) {
     ) {
         Header(m, c, facts, shell, Modifier.arrive(shell, 0))
         if (c != null && facts != null) {
-            facts.receipt?.let { r -> Section(shell, 1, tr("Last answer", "Ostatnia odpowiedź")) { Stats(r, m.status?.model?.context) } }
-            if (facts.files.isNotEmpty()) Section(shell, 2, tr("In this chat", "W tym czacie")) { Gallery(facts.files) }
-            Section(shell, 3, tr("Chat settings", "Ustawienia czatu")) { ChatSettings(m, c) }
-            Section(shell, 4, tr("Personality", "Osobowość")) { Voices(c.persona) { m.setPersona(it) } }
+            facts.receipt?.let { r -> Section(shell, 1, tr("Last answer", "Ostatnia odpowiedź")) { Group { Stats(r) } } }
+            Section(shell, 2, tr("Memory", "Pamięć")) { Memory(m, c, facts) }
+            if (facts.files.isNotEmpty()) Section(shell, 3, tr("In this chat", "W tym czacie")) { Gallery(facts.files) }
+            Section(shell, 4, tr("Chat settings", "Ustawienia czatu")) { ChatSettings(m, c) }
+            Section(shell, 5, tr("Personality", "Osobowość")) { Voices(c.persona, m.style.persona) { m.setPersona(it) } }
         }
-        Section(shell, 5, tr("Context", "Kontekst")) { ContextRow(m, shell) }
-        Section(shell, 6, tr("Model", "Model")) { ModelRow(m, shell) }
+        Section(shell, 6, tr("Answers come from", "Odpowiedzi pochodzą z")) {
+            Group {
+                ModelRow(m, shell)
+                ContextRow(m, shell)
+            }
+        }
         if (c != null) Section(shell, 7, null) { ChatActions(m, c, shell) }
     }
 }
@@ -187,8 +198,19 @@ private fun Header(m: AppModel, c: Chat?, facts: Facts?, shell: Shell, modifier:
             Spacer(Modifier.size(4.dp))
             BasicText(
                 tr("${facts.asked} questions · started ", "pytania: ${facts.asked} · od ") + whenLabel(c.raw.optLong("createdAt")),
-                style = Type.Meta,
+                style = Type.Meta.copy(color = Ink.Three),
             )
+        }
+        if (c?.temporary ?: m.temporary) {
+            Spacer(Modifier.size(10.dp))
+            Row(
+                Modifier.background(Tone.Panel, Chrome.Capsule).padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Glyph.EyeOff, Ink.Two, size = 14.dp)
+                Spacer(Modifier.width(6.dp))
+                BasicText(tr("Temporary · not saved", "Tymczasowy · nie zapisuje się"), style = Type.Label.copy(color = Ink.Two))
+            }
         }
     }
 }
@@ -244,7 +266,7 @@ private fun Title(m: AppModel, c: Chat?, shell: Shell) {
                     )
                 },
             enabled = editing,
-            textStyle = TitleStyle,
+            textStyle = Type.BrandTitle.copy(color = Ink.One),
             cursorBrush = SolidColor(accent),
             maxLines = 4,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
@@ -278,44 +300,24 @@ private fun Title(m: AppModel, c: Chat?, shell: Shell) {
     }
 }
 
-/** How the last answer ran, from its receipt: speed, wait, tokens in and out, and how full the window is. */
+/** How the last answer ran, from its receipt: speed, wait, and tokens in and out. */
 @Composable
-private fun Stats(r: JSONObject, window: Int?) {
-    val accent = LocalAccent.current
+private fun Stats(r: JSONObject) {
     val speed = r.optDouble("decode_tok_s", 0.0)
     val prompt = r.optLong("prompt_tokens").takeIf { it > 0 } ?: r.optLong("working_tokens")
     val made = r.optLong("generated_tokens")
     val first = r.optDouble("ttft_ms", 0.0).takeIf { it > 0 } ?: r.optDouble("prefill_tok_s", 0.0).takeIf { it > 0 && prompt > 0 }?.let {
         r.optDouble("select_ms", 0.0) + r.optDouble("assemble_ms", 0.0) + prompt / it * 1000
     }
-    val used = (r.optLong("working_tokens").takeIf { it > 0 } ?: prompt) + made
-    val share = if (window != null && window > 0) (used.toFloat() / window).coerceIn(0f, 1f) else null
-    val fill = animateFloatAsState(share ?: 0f, Motion.calmText(), label = "used")
-
-    Column(Modifier.fillMaxWidth().background(Tone.Panel, Shapes.Card).padding(Space.S4), verticalArrangement = Arrangement.spacedBy(Space.S4)) {
+    Block {
         Row {
             Stat(if (speed > 0) "%.1f".format(Locale.US, speed) else "–", tr("tokens per second", "tokenów na sekundę"), Modifier.weight(1f))
             Stat(first?.let { "%.2f s".format(Locale.US, it / 1000) } ?: "–", tr("to the first token", "do pierwszego tokenu"), Modifier.weight(1f))
         }
+        Spacer(Modifier.size(Space.S4))
         Row {
             Stat(count(prompt), tr("tokens read", "tokenów wczytanych"), Modifier.weight(1f))
             Stat(count(made), tr("tokens written", "tokenów napisanych"), Modifier.weight(1f))
-        }
-        if (share != null) Column {
-            Row(verticalAlignment = Alignment.Bottom) {
-                BasicText(tr("Context used", "Użyty kontekst"), Modifier.weight(1f), style = Type.Meta)
-                Roll("${(share * 100).roundToInt()}%", Type.Meta.copy(color = Ink.One, fontWeight = FontWeight.Medium), digits = true)
-                BasicText(tr(" of ", " z ") + tokens(window!!.toLong()), style = Type.Meta)
-            }
-            Spacer(Modifier.size(Space.S2))
-            Box(
-                Modifier.fillMaxWidth().height(6.dp).drawBehind {
-                    val r6 = CornerRadius(size.height / 2)
-                    drawRoundRect(Tone.Inset, cornerRadius = r6)
-                    val w = size.width * fill.value
-                    if (w > 0f) drawRoundRect(if (fill.value > 0.9f) Signal.Warn else accent, size = Size(w.coerceAtLeast(size.height), size.height), cornerRadius = r6)
-                },
-            )
         }
     }
 }
@@ -323,12 +325,154 @@ private fun Stats(r: JSONObject, window: Int?) {
 @Composable
 private fun Stat(value: String, label: String, modifier: Modifier) {
     Column(modifier) {
-        Roll(value, StatStyle, digits = true)
-        BasicText(label, style = Type.Label)
+        Roll(value, Type.brand(26.sp).copy(color = Ink.One), digits = true)
+        BasicText(label, style = Type.Label.copy(color = Ink.Three))
     }
 }
 
 private fun count(n: Long) = if (n > 0) "%,d".format(Locale.US, n) else "–"
+
+/** 1,234 as "1.2K", 32,768 as "33K": short enough to sit beside a bar. */
+private fun short(n: Long): String = when {
+    n >= 1_000_000 -> "%.1fM".format(Locale.US, n / 1e6).replace(".0M", "M")
+    n >= 10_000 -> "%.0fK".format(Locale.US, n / 1e3)
+    n >= 1_000 -> "%.1fK".format(Locale.US, n / 1e3).replace(".0K", "K")
+    else -> "$n"
+}
+
+/**
+ * What this chat keeps in memory against the model's window, with Forget, then how the window
+ * was filled at the last answer. Numbers only, as the computer reports them.
+ */
+@Composable
+private fun Memory(m: AppModel, c: Chat, facts: Facts) {
+    val accent = LocalAccent.current
+    val view = LocalView.current
+    val kept = m.memory(c.id)
+    val held = kept?.tokens ?: 0L
+    val meter = remember(c, m.status) { m.meter(c.id) }
+    val window = meter?.window?.takeIf { it > 0 } ?: m.status?.model?.context?.takeIf { it > 0 } ?: facts.window
+    var asking by remember(c.id) { mutableStateOf(false) }
+    LaunchedEffect(held) { if (held <= 0L) asking = false }
+
+    Group {
+        Block {
+            if (c.temporary) {
+                BasicText(tr("Nothing is kept", "Nic nie jest zachowywane"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+                BasicText(tr("Temporary chats leave nothing in memory.", "Czaty tymczasowe nie zostawiają nic w pamięci."), style = Type.Meta.copy(color = Ink.Three))
+                return@Block
+            }
+            AnimatedContent(
+                asking,
+                transitionSpec = {
+                    fadeIn(tween(Motion.M2, delayMillis = 40)) togetherWith fadeOut(tween(Motion.M1)) using
+                        SizeTransform(clip = false) { _, _ -> spring(1f, 520f, IntSize.VisibilityThreshold) }
+                },
+                label = "forget",
+            ) { ask ->
+                if (!ask) Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Roll(if (held > 0) short(held) else "0", Type.brand(26.sp).copy(color = Ink.One), digits = true)
+                            BasicText(
+                                when {
+                                    held <= 0 -> tr("tokens kept · nothing yet", "tokenów · jeszcze nic")
+                                    kept?.documents == 1 -> tr("tokens kept · 1 document", "tokenów · 1 dokument")
+                                    else -> tr("tokens kept · ${kept?.documents ?: 0} documents", "tokenów · dokumenty: ${kept?.documents ?: 0}")
+                                },
+                                style = Type.Label.copy(color = Ink.Three),
+                            )
+                        }
+                        Pill(tr("Forget", "Zapomnij"), {
+                            view.feel(Feel.Edge)
+                            asking = true
+                        }, ink = Signal.Err, enabled = held > 0, height = 36.dp)
+                    }
+                    if (window > 0) {
+                        Spacer(Modifier.size(Space.S3))
+                        val share = held.toFloat() / window
+                        Bar(listOf(share.coerceAtMost(1f) to accent))
+                        Spacer(Modifier.size(6.dp))
+                        BasicText(
+                            if (share > 1f) tr("%.1f× the model window of ${short(window.toLong())}".format(Locale.US, share), "%.1f× okno modelu (${short(window.toLong())})".format(Locale.US, share))
+                            else tr("${(share * 100).roundToInt()}% of the model window of ${short(window.toLong())}", "${(share * 100).roundToInt()}% okna modelu (${short(window.toLong())})"),
+                            style = Type.Meta.copy(color = Ink.Three),
+                        )
+                    }
+                } else Column {
+                    BasicText(tr("Forget what this chat kept?", "Zapomnieć, co zachował ten czat?"), style = Type.Section.copy(color = Ink.One))
+                    Spacer(Modifier.size(Space.S1))
+                    BasicText(tr("The messages stay. Later answers start without it.", "Wiadomości zostają. Kolejne odpowiedzi zaczną bez tego."), style = Type.Meta.copy(color = Ink.Three))
+                    Spacer(Modifier.size(Space.S3))
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
+                        Pill(tr("Keep", "Zostaw"), { asking = false }, Modifier.weight(1f), height = 44.dp)
+                        Pill(tr("Forget", "Zapomnij"), {
+                            view.feel(Feel.Confirm)
+                            asking = false
+                            m.forgetMemory(c.id)
+                        }, Modifier.weight(1f), ink = Signal.Err, height = 44.dp)
+                    }
+                }
+            }
+        }
+        if (meter != null && window > 0) Block {
+            val used = meter.used.toFloat() / window
+            Row(verticalAlignment = Alignment.Bottom) {
+                BasicText(tr("Window used", "Użyte okno"), Modifier.weight(1f), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+                Roll("${(used * 100).roundToInt().coerceAtMost(100)}%", Type.Meta.copy(color = Ink.One, fontWeight = FontWeight.Medium), digits = true)
+                BasicText(tr(" of ${short(window.toLong())}", " z ${short(window.toLong())}"), style = Type.Meta.copy(color = Ink.Three))
+            }
+            Spacer(Modifier.size(Space.S2))
+            val conversation = Ink.Two.copy(alpha = 0.55f)
+            val reply = Ink.Three.copy(alpha = 0.4f)
+            Bar(
+                listOf(
+                    meter.memory.toFloat() / window to accent,
+                    meter.conversation.toFloat() / window to conversation,
+                    meter.reply.toFloat() / window to reply,
+                ),
+                warn = used > 0.9f,
+            )
+            Spacer(Modifier.size(Space.S2))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.S3)) {
+                Legend(accent, tr("Memory", "Pamięć"), meter.memory)
+                Legend(conversation, tr("Chat", "Czat"), meter.conversation)
+                Legend(reply, tr("Reply", "Odpowiedź"), meter.reply)
+            }
+        }
+    }
+}
+
+/**
+ * A capsule track filled by [parts] in order, each a share of the whole; it grows and shrinks
+ * without a jump. Each part is drawn from the start to its own end, last first, so the joins stay
+ * straight and only the ends are round.
+ */
+@Composable
+private fun Bar(parts: List<Pair<Float, Color>>, warn: Boolean = false) {
+    val shares = parts.map { (share, _) -> animateFloatAsState(share.coerceIn(0f, 1f), Motion.calmText(), label = "bar") }
+    Box(
+        Modifier.fillMaxWidth().height(8.dp).drawBehind {
+            val r = CornerRadius(size.height / 2)
+            drawRoundRect(Tone.Inset, cornerRadius = r)
+            val ends = shares.runningFold(0f) { end, s -> end + s.value }.drop(1)
+            for (i in parts.indices.reversed()) {
+                val w = (size.width * ends[i].coerceAtMost(1f))
+                if (w <= 0f || shares[i].value <= 0f) continue
+                drawRoundRect(if (warn) Signal.Warn else parts[i].second, Offset.Zero, Size(w.coerceAtLeast(size.height), size.height), r)
+            }
+        },
+    )
+}
+
+@Composable
+private fun Legend(color: Color, label: String, n: Long) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(color, CircleShape))
+        Spacer(Modifier.width(5.dp))
+        BasicText("$label ${short(n)}", style = Type.Label.copy(color = Ink.Three))
+    }
+}
 
 /** Every picture and file sent in the chat; a tap grows the preview out of the tile. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -352,7 +496,7 @@ private fun Gallery(files: List<JSONObject>) {
                     Spacer(Modifier.size(4.dp))
                     BasicText(
                         f.optString("name"),
-                        style = Type.Label.copy(fontSize = 10.sp, textAlign = TextAlign.Center),
+                        style = Type.Label.copy(color = Ink.Three, fontSize = 10.sp, textAlign = TextAlign.Center),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -375,11 +519,11 @@ private fun Modifier.hiddenWhile(item: PreviewItem) = graphicsLayer { alpha = if
 
 @Composable
 private fun ChatSettings(m: AppModel, c: Chat) {
-    Column(Modifier.fillMaxWidth().clip(Shapes.Card), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Group {
         Block { Instructions(m, c) }
         Block { Creativity(c.temperature) { m.setTemperature(it) } }
         Block {
-            BasicText(tr("Longest answer", "Najdłuższa odpowiedź"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+            BasicText(tr("Longest answer", "Najdłuższa odpowiedź"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
             Spacer(Modifier.size(Space.S2))
             val options = if (c.maxTokens in Lengths) Lengths else Lengths + c.maxTokens
             Segmented(
@@ -390,27 +534,38 @@ private fun ChatSettings(m: AppModel, c: Chat) {
         }
         if (m.status?.model?.thinks == true) Block {
             Row(verticalAlignment = Alignment.Bottom) {
-                BasicText(tr("Thinking", "Myślenie"), Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-                BasicText(tr("All chats", "Wszystkie czaty"), style = Type.Meta)
+                BasicText(tr("Thinking", "Myślenie"), Modifier.weight(1f), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+                BasicText(tr("All chats", "Wszystkie czaty"), style = Type.Meta.copy(color = Ink.Three))
             }
             Spacer(Modifier.size(Space.S2))
             Segmented(effortLabels(), Efforts.indexOf(m.effort ?: "medium").coerceAtLeast(0), { m.pickEffort(Efforts[it]) })
         }
-        Switch(
-            Glyph.Globe, tr("Search the web", "Szukaj w sieci"),
-            if (c.web == null) tr("As in Settings", "Jak w Ustawieniach") else tr("For this chat", "W tym czacie"),
-            c.web ?: m.webDefault,
-        ) { m.setChatWeb(it) }
-        Switch(
-            Glyph.Link, tr("Plugins", "Wtyczki"),
-            when (val n = m.plugins.size) {
-                0 -> tr("None on your computer", "Brak na komputerze")
-                1 -> tr("1 tool on your computer", "1 narzędzie na komputerze")
-                else -> tr("$n tools on your computer", "Narzędzia na komputerze: $n")
-            },
-            c.plugins ?: m.pluginsDefault,
-        ) { m.setChatPlugins(it) }
+        val web = c.web ?: m.webDefault
+        Switch(Glyph.Globe, tr("Search the web", "Szukaj w sieci"), stateLine(web, c.web == null, null), web) { m.setChatWeb(it) }
+        val plugins = c.plugins ?: m.pluginsDefault
+        val tools = when (val n = m.plugins.size) {
+            0 -> tr("none on your computer", "brak na komputerze")
+            1 -> tr("1 tool", "1 narzędzie")
+            else -> tr("$n tools", "narzędzia: $n")
+        }
+        Switch(Glyph.Link, tr("Plugins", "Wtyczki"), stateLine(plugins, c.plugins == null, tools), plugins) { m.setChatPlugins(it) }
     }
+}
+
+/** "On for this chat", "Off, as in Settings", with what it reaches after a dot. */
+private fun stateLine(on: Boolean, inherited: Boolean, extra: String?): String {
+    val state = when {
+        on && inherited -> tr("On, as in Settings", "Włączone, jak w Ustawieniach")
+        on -> tr("On for this chat", "Włączone w tym czacie")
+        inherited -> tr("Off, as in Settings", "Wyłączone, jak w Ustawieniach")
+        else -> tr("Off for this chat", "Wyłączone w tym czacie")
+    }
+    return if (extra != null) "$state · $extra" else state
+}
+
+@Composable
+private fun Group(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(Chrome.Group), verticalArrangement = Arrangement.spacedBy(2.dp), content = content)
 }
 
 @Composable
@@ -418,19 +573,24 @@ private fun Block(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().background(Tone.Panel).padding(Space.S4), content = content)
 }
 
+/** The whole row flips the switch, not only the knob. */
 @Composable
 private fun Switch(glyph: Glyph, title: String, detail: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    val ink by animateColorAsState(if (on) LocalAccent.current else Ink.Three, tween(Motion.M2), label = "switch")
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).background(Tone.Panel).padding(horizontal = Space.S4),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp)
+            .pressable({ onChange(!on) }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = if (on) Feel.Off else Feel.On, role = Role.Switch)
+            .padding(horizontal = Space.S4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(glyph, Ink.Two, size = 18.dp)
+        Icon(glyph, ink, size = 18.dp)
         Spacer(Modifier.width(Space.S3))
         Column(Modifier.weight(1f)) {
-            BasicText(title, style = Type.Body.copy(fontWeight = FontWeight.Medium))
-            BasicText(detail, style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(title, style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+            BasicText(detail, style = Type.Meta.copy(color = Ink.Three), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Toggle(on, onChange)
+        Spacer(Modifier.width(Space.S2))
+        Toggle(on, onChange, description = title)
     }
 }
 
@@ -446,15 +606,15 @@ private fun Instructions(m: AppModel, c: Chat) {
         delay(800)
         keep()
     }
-    BasicText(tr("Instructions", "Instrukcje"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-    BasicText(tr("The model follows these in every answer here.", "Model stosuje je w każdej odpowiedzi tutaj."), style = Type.Meta)
+    BasicText(tr("Instructions", "Instrukcje"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+    BasicText(tr("The model follows these in every answer here.", "Model stosuje je w każdej odpowiedzi tutaj."), style = Type.Meta.copy(color = Ink.Three))
     Spacer(Modifier.size(Space.S2))
     BasicTextField(
         draft,
         { draft = it },
         Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) keep() }
             .background(Tone.Inset, Shapes.ControlLg).padding(horizontal = Space.S3, vertical = Space.S3),
-        textStyle = Type.Body,
+        textStyle = Type.Body.copy(color = Ink.One),
         cursorBrush = SolidColor(accent),
         minLines = 3,
         maxLines = 10,
@@ -490,16 +650,16 @@ private fun Creativity(value: Double?, onSet: (Double?) -> Unit) {
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        BasicText(tr("Creativity", "Kreatywność"), Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+        BasicText(tr("Creativity", "Kreatywność"), Modifier.weight(1f), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
         val reset by animateColorAsState(if (value != null) Ink.Three else Color.Transparent, tween(Motion.M2), label = "reset")
         BasicText(
             tr("Reset", "Domyślnie"),
             Modifier.padding(end = Space.S2)
-                .pressable({ if (value != null) set.value(null) }, Shapes.ControlSm, enabled = value != null, feel = Feel.Tick)
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+                .pressable({ if (value != null) set.value(null) }, Chrome.Capsule, enabled = value != null, feel = Feel.Tick)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
             style = Type.Meta.copy(color = reset),
         )
-        Roll("%.1f".format(Locale.US, live), Type.Body.copy(fontWeight = FontWeight.SemiBold), digits = true)
+        Roll("%.1f".format(Locale.US, live), Type.Body.copy(color = Ink.One, fontWeight = FontWeight.SemiBold), digits = true)
     }
     Spacer(Modifier.size(Space.S1))
     Box(
@@ -547,116 +707,157 @@ private fun Creativity(value: Double?, onSet: (Double?) -> Unit) {
             },
     )
     Row {
-        BasicText(tr("Precise", "Dokładnie"), Modifier.weight(1f), style = Type.Label)
-        BasicText(tr("Inventive", "Pomysłowo"), style = Type.Label)
+        BasicText(tr("Precise", "Dokładnie"), Modifier.weight(1f), style = Type.Label.copy(color = Ink.Three))
+        BasicText(tr("Inventive", "Pomysłowo"), style = Type.Label.copy(color = Ink.Three))
     }
 }
 
+/** The model sheet grows out of this row. */
 @Composable
 private fun ModelRow(m: AppModel, shell: Shell) {
     val accent = LocalAccent.current
     val name = m.status?.model?.name
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp)
-            .pressable({ shell.open(Surface.Model, "details-model") }, Shapes.Card, Tone.Panel, Tone.Raise, depth = 0.985f, tilt = 2f)
-            .padding(horizontal = Space.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (name != null) ModelFace(m, name, m.status?.model?.family.orEmpty(), 36.dp)
-        else Box(Modifier.size(36.dp).background(Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) { Icon(Glyph.Models, Ink.Three, size = 18.dp) }
-        Spacer(Modifier.width(Space.S3))
-        Column(Modifier.weight(1f)) {
-            BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            BasicText(tr("Change", "Zmień"), style = Type.Meta.copy(color = accent))
+    MorphSource("details-model", Surface.Model, Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.morph("details-model", this, RectangleShape)
+                .fillMaxWidth().heightIn(min = 64.dp)
+                .pressable({ shell.open(Surface.Model, "details-model") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
+                .padding(horizontal = Space.S4),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (name != null) ModelFace(m, name, m.status?.model?.family.orEmpty(), 36.dp)
+            else Box(Modifier.size(36.dp).background(Tone.Raise, CircleShape), contentAlignment = Alignment.Center) { Icon(Glyph.Models, Ink.Three, size = 18.dp) }
+            Spacer(Modifier.width(Space.S3))
+            Column(Modifier.weight(1f)) {
+                BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BasicText(
+                    m.status?.model?.context?.let { tr("Window ${short(it.toLong())} tokens", "Okno ${short(it.toLong())} tokenów") } ?: tr("Choose one", "Wybierz"),
+                    style = Type.Meta.copy(color = if (name == null) accent else Ink.Three),
+                )
+            }
+            Icon(Glyph.Right, Ink.Four, size = 16.dp)
         }
-        Icon(Glyph.Right, Ink.Four, size = 16.dp)
     }
 }
 
+/** The context sheet grows out of this row. */
 @Composable
 private fun ContextRow(m: AppModel, shell: Shell) {
     val accent = LocalAccent.current
-    val chosen = m.chat?.contextName ?: m.defaultContext
+    val chosen = m.chat.let { c -> if (c == null) m.defaultContext else c.contextName?.takeIf { !it.startsWith("chat-") } }
     val info = m.contexts.firstOrNull { it.name == chosen }
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp)
-            .pressable({ shell.open(Surface.Context, "details-context") }, Shapes.Card, Tone.Panel, Tone.Raise, depth = 0.985f, tilt = 2f)
-            .padding(horizontal = Space.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(36.dp).background(if (chosen != null) accent.copy(alpha = 0.16f) else Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) {
-            Icon(Glyph.Contexts, if (chosen != null) accent else Ink.Three, size = 18.dp)
+    MorphSource("details-context", Surface.Context, Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.morph("details-context", this, RectangleShape)
+                .fillMaxWidth().heightIn(min = 64.dp)
+                .pressable({ shell.open(Surface.Context, "details-context") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
+                .padding(horizontal = Space.S4),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(36.dp).background(if (chosen != null) accent.copy(alpha = 0.16f) else Tone.Raise, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Glyph.Contexts, if (chosen != null) accent else Ink.Three, size = 18.dp)
+            }
+            Spacer(Modifier.width(Space.S3))
+            Column(Modifier.weight(1f)) {
+                BasicText(chosen ?: tr("No context", "Bez kontekstu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BasicText(
+                    if (chosen == null) tr("Answers from the chat alone", "Odpowiedzi tylko z czatu")
+                    else info?.tokens?.let { tokens(it) } ?: tr("Change", "Zmień"),
+                    style = Type.Meta.copy(color = Ink.Three),
+                )
+            }
+            Icon(Glyph.Right, Ink.Four, size = 16.dp)
         }
-        Spacer(Modifier.width(Space.S3))
-        Column(Modifier.weight(1f)) {
-            BasicText(chosen ?: tr("No context", "Bez kontekstu"), style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            BasicText(
-                if (chosen == null) tr("Answers from the chat alone", "Odpowiedzi tylko z czatu")
-                else info?.tokens?.let { tokens(it) } ?: tr("Change", "Zmień"),
-                style = Type.Meta,
-            )
-        }
-        Icon(Glyph.Right, Ink.Four, size = 16.dp)
     }
 }
 
-/** Pin, a copy to take elsewhere, and delete behind an island that asks first. */
+private val Formats = listOf("pdf" to "PDF", "md" to "Markdown", "txt" to "Text", "json" to "JSON")
+
+/** Pin, a copy, an export to share, and delete that asks in place; one group. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatActions(m: AppModel, c: Chat, shell: Shell) {
     val view = LocalView.current
+    val context = LocalContext.current
     var asking by remember(c.id) { mutableStateOf(false) }
-    LaunchedEffect(c.id) { snapshotFlow { shell.drawer.targetValue }.collect { if (it > -1f) asking = false } }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Column(Modifier.fillMaxWidth().clip(Shapes.Card), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    var exporting by remember(c.id) { mutableStateOf(false) }
+    LaunchedEffect(c.id) {
+        snapshotFlow { shell.drawer.targetValue }.collect {
+            if (it > -1f) {
+                asking = false
+                exporting = false
+            }
+        }
+    }
+    Group {
+        if (!c.temporary) {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).background(Tone.Panel).padding(horizontal = Space.S4),
+                Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    .pressable({ m.pin(c.id) }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = if (c.pinned) Feel.Off else Feel.On, role = Role.Switch)
+                    .padding(horizontal = Space.S4),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Glyph.Pin, Ink.Two, size = 18.dp)
                 Spacer(Modifier.width(Space.S3))
-                BasicText(tr("Pinned", "Przypięty"), Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-                Toggle(c.pinned, { m.pin(c.id) })
+                BasicText(tr("Pinned", "Przypięty"), Modifier.weight(1f), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+                Toggle(c.pinned, { m.pin(c.id) }, description = tr("Pinned", "Przypięty"))
             }
             Line(Glyph.Copy, tr("Duplicate", "Duplikuj"), Ink.One) {
                 m.duplicate(c.id)?.let { shell.openChat(it, c.title) }
             }
         }
-        Spacer(Modifier.size(Space.S2))
+        Column(Modifier.fillMaxWidth().background(Tone.Panel)) {
+            Line(Glyph.Send, tr("Export", "Eksportuj"), Ink.One, trailing = if (exporting) Glyph.Down else Glyph.Right) { exporting = !exporting }
+            AnimatedVisibility(
+                exporting,
+                enter = expandVertically(spring(1f, 520f, IntSize.VisibilityThreshold)) + fadeIn(tween(Motion.M2, delayMillis = 40)),
+                exit = shrinkVertically(spring(1f, 620f, IntSize.VisibilityThreshold)) + fadeOut(tween(Motion.M1)),
+            ) {
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(start = Space.S4, end = Space.S4, bottom = Space.S4),
+                    horizontalArrangement = Arrangement.spacedBy(Space.S2),
+                    verticalArrangement = Arrangement.spacedBy(Space.S2),
+                ) {
+                    Formats.forEach { (format, label) ->
+                        Pill(label, {
+                            view.feel(Feel.Confirm)
+                            exportChat(context, c, format) { m.error = it }
+                        }, height = 36.dp)
+                    }
+                }
+            }
+        }
         AnimatedContent(
             asking,
+            Modifier.fillMaxWidth().background(Tone.Panel),
             transitionSpec = {
-                val enter = if (shell.calm) fadeIn(tween(Motion.M2))
-                else fadeIn(tween(Motion.M2, delayMillis = 40)) + scaleIn(spring(0.85f, 520f), 0.92f)
-                enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = false) { _, _ -> spring(1f, 520f, IntSize.VisibilityThreshold) }
+                fadeIn(tween(Motion.M2, delayMillis = 40)) togetherWith fadeOut(tween(Motion.M1)) using
+                    SizeTransform(clip = true) { _, _ -> spring(1f, 520f, IntSize.VisibilityThreshold) }
             },
             label = "delete",
         ) { ask ->
             if (!ask) {
-                Line(Glyph.Trash, tr("Delete this chat", "Usuń ten czat"), Signal.Err, Shapes.Card) {
+                Line(Glyph.Trash, tr("Delete this chat", "Usuń ten czat"), Signal.Err) {
                     view.feel(Feel.Edge)
                     asking = true
                 }
             } else {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .shadow(14.dp, Shapes.Card, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.45f))
-                        .background(Tone.Raise, Shapes.Card)
-                        .padding(Space.S4),
-                ) {
-                    BasicText(tr("Delete this chat?", "Usunąć ten czat?"), style = Type.Section)
+                Column(Modifier.fillMaxWidth().padding(Space.S4)) {
+                    BasicText(tr("Delete this chat?", "Usunąć ten czat?"), style = Type.Section.copy(color = Ink.One))
                     Spacer(Modifier.size(Space.S1))
                     BasicText(
-                        tr("It goes from this phone and from your computer.", "Zniknie z telefonu i z komputera."),
-                        style = Type.Meta,
+                        if (c.temporary) tr("It is not saved anywhere, so it is gone for good.", "Nie jest nigdzie zapisany, więc zniknie na zawsze.")
+                        else tr("It goes from this phone and from your computer.", "Zniknie z telefonu i z komputera."),
+                        style = Type.Meta.copy(color = Ink.Three),
                     )
                     Spacer(Modifier.size(Space.S4))
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
-                        Btn(tr("Keep", "Zostaw"), { asking = false }, Modifier.weight(1f), variant = Variant.Quiet, height = 44.dp)
-                        Btn(tr("Delete", "Usuń"), {
+                        Pill(tr("Keep", "Zostaw"), { asking = false }, Modifier.weight(1f), height = 44.dp)
+                        Pill(tr("Delete", "Usuń"), {
                             view.feel(Feel.Confirm)
                             m.delete(c.id)
                             shell.closeDrawer()
-                        }, Modifier.weight(1f), variant = Variant.Danger, height = 44.dp)
+                        }, Modifier.weight(1f), ink = OnAccent, fill = Signal.Err, height = 44.dp)
                     }
                 }
             }
@@ -664,66 +865,91 @@ private fun ChatActions(m: AppModel, c: Chat, shell: Shell) {
     }
 }
 
-/** Off first, then the panel's personalities as faces; the chosen one is lifted in the accent. */
+/**
+ * Default follows the personality in the answer settings and shows which one that is; Off is the
+ * model as shipped; then the panel's personalities. The chosen one is lifted in the accent.
+ */
 @Composable
-private fun Voices(chosen: String?, onPick: (String?) -> Unit) {
+private fun Voices(chosen: String?, global: String, onPick: (String?) -> Unit) {
     val accent = LocalAccent.current
-    val all = listOf<Persona?>(null) + Personas
-    Column(Modifier.clip(Shapes.Card), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        all.chunked(3).forEach { row ->
+    val fallback = Personas.firstOrNull { it.id == global }
+    Group {
+        val on = chosen == null
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                .pressable({ onPick(null) }, RectangleShape, if (on) accent.copy(alpha = 0.14f) else Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
+                .padding(horizontal = Space.S4),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(fallback?.face ?: "🤖", style = Type.Title.copy(color = Ink.One))
+            Spacer(Modifier.width(Space.S3))
+            Column(Modifier.weight(1f)) {
+                BasicText(tr("Default", "Domyślna"), style = Type.Body.copy(color = if (on) accent else Ink.One, fontWeight = FontWeight.Medium))
+                BasicText(
+                    tr("As in Settings · ", "Jak w Ustawieniach · ") + (fallback?.let { tr(it.nameEn, it.namePl) } ?: tr("Off", "Wyłączona")),
+                    style = Type.Meta.copy(color = Ink.Three),
+                )
+            }
+            val tick by animateFloatAsState(if (on) 1f else 0f, Motion.calmText(), label = "default")
+            Icon(Glyph.Check, accent, Modifier.graphicsLayer { alpha = tick; scaleX = 0.6f + 0.4f * tick; scaleY = scaleX }, size = 18.dp)
+        }
+        (listOf<Persona?>(null) + Personas).chunked(3).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                row.forEach { p ->
-                    val on = p?.id == chosen
-                    val fill by animateColorAsState(if (on) accent.copy(alpha = 0.16f) else Tone.Panel, label = "voice")
-                    val lift by animateFloatAsState(if (on) 1f else 0f, spring(0.55f, 480f), label = "lift")
-                    Column(
-                        Modifier.weight(1f).heightIn(min = 88.dp)
-                            .pressable({ onPick(p?.id) }, RectangleShape, fill, Tone.Raise, depth = 0.95f, tilt = 6f)
-                            .padding(vertical = Space.S3, horizontal = Space.S2),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        BasicText(
-                            p?.face ?: "🤖",
-                            Modifier.graphicsLayer {
-                                scaleX = 1f + 0.18f * lift
-                                scaleY = scaleX
-                                translationY = -3.dp.toPx() * lift
-                            },
-                            style = Type.Title.copy(color = Ink.One),
-                        )
-                        Spacer(Modifier.size(4.dp))
-                        BasicText(
-                            p?.let { tr(it.nameEn, it.namePl) } ?: tr("Off", "Wyłączona"),
-                            style = Type.Label.copy(color = if (on) accent else Ink.Two, fontSize = 11.sp),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                row.forEach { p -> Voice(p, (p?.id ?: "off") == chosen, Modifier.weight(1f)) { onPick(p?.id ?: "off") } }
             }
         }
+    }
+}
+
+@Composable
+private fun Voice(p: Persona?, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val accent = LocalAccent.current
+    val fill by animateColorAsState(if (on) accent.copy(alpha = 0.14f) else Tone.Panel, label = "voice")
+    val lift by animateFloatAsState(if (on) 1f else 0f, spring(0.55f, 480f), label = "lift")
+    Column(
+        modifier.heightIn(min = 84.dp)
+            .pressable(onClick, RectangleShape, fill, Tone.Raise, depth = 0.95f, tilt = 6f, feel = Feel.Tick)
+            .padding(vertical = Space.S3, horizontal = Space.S2),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        BasicText(
+            p?.face ?: "🤖",
+            Modifier.graphicsLayer {
+                scaleX = 1f + 0.18f * lift
+                scaleY = scaleX
+                translationY = -3.dp.toPx() * lift
+            },
+            style = Type.Title.copy(color = Ink.One),
+        )
+        Spacer(Modifier.size(4.dp))
+        BasicText(
+            p?.let { tr(it.nameEn, it.namePl) } ?: tr("Off", "Wyłączona"),
+            style = Type.Label.copy(color = if (on) accent else Ink.Two, fontSize = 11.sp),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
 private fun Section(shell: Shell, slot: Int, title: String?, content: @Composable () -> Unit) {
     Column(Modifier.arrive(shell, slot)) {
-        if (title != null) BasicText(title, Modifier.padding(start = 8.dp, bottom = 8.dp), style = Type.Label)
+        if (title != null) BasicText(title, Modifier.padding(start = 8.dp, bottom = 8.dp), style = Type.Label.copy(color = Ink.Three))
         content()
     }
 }
 
 @Composable
-private fun Line(glyph: Glyph, label: String, ink: Color, shape: Shape = RectangleShape, onClick: () -> Unit) {
+private fun Line(glyph: Glyph, label: String, ink: Color, trailing: Glyph? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .pressable(onClick, shape, Tone.Panel, Tone.Raise, depth = 0.985f)
+            .pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
             .padding(horizontal = Space.S4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(glyph, ink, size = 18.dp)
         Spacer(Modifier.width(Space.S3))
-        BasicText(label, style = Type.Body.copy(color = ink, fontWeight = FontWeight.Medium))
+        BasicText(label, Modifier.weight(1f), style = Type.Body.copy(color = ink, fontWeight = FontWeight.Medium))
+        if (trailing != null) Icon(trailing, Ink.Four, size = 16.dp)
     }
 }

@@ -7,7 +7,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,12 +30,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.Motion
@@ -70,7 +68,7 @@ fun ListRow(
 ) {
     val base = modifier.fillMaxWidth().heightIn(min = 56.dp)
     Row(
-        (if (onClick != null) base.pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = null) else base.background(Tone.Panel))
+        (if (onClick != null) base.pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = null) else base.semantics(mergeDescendants = true) {}.background(Tone.Panel))
             .padding(horizontal = Space.S4, vertical = Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -97,10 +95,11 @@ fun <T> Choice(
     detail: ((T) -> String?)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
-    val turn by animateFloatAsState(if (open) 180f else 0f, Motion.travel(), label = "chevron")
+    val turn = animateFloatAsState(if (open) 180f else 0f, Motion.travel(), label = "chevron")
     Column(Modifier.fillMaxWidth().background(Tone.Panel)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                .semantics { stateDescription = folded(open) }
                 .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
                 .padding(horizontal = Space.S4, vertical = Space.S3),
             verticalAlignment = Alignment.CenterVertically,
@@ -108,7 +107,7 @@ fun <T> Choice(
             BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
             BasicText(label(selected), style = Type.Body.copy(color = Ink.Three))
             Spacer(Modifier.width(Space.S2))
-            Image(Icons.Default.KeyboardArrowDown, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
+            Icon(Glyph.Down, Ink.Three, Modifier.graphicsLayer { rotationZ = turn.value }, size = 16.dp)
         }
         AnimatedVisibility(
             open,
@@ -121,7 +120,8 @@ fun <T> Choice(
                     val shown by animateFloatAsState(if (on) 1f else 0f, Motion.press(), label = "check")
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .pressable({ onSelect(o); open = false }, Shapes.ControlLg, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
+                            .semantics { this.selected = on }
+                            .pressable({ onSelect(o); open = false }, Shapes.ControlLg, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick, role = Role.RadioButton)
                             .padding(horizontal = Space.S3),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -129,10 +129,10 @@ fun <T> Choice(
                             BasicText(label(o), style = Type.Body.copy(color = if (on) Ink.One else Ink.Two))
                             detail?.invoke(o)?.let { BasicText(it, style = Type.Meta) }
                         }
-                        Image(
-                            Icons.Default.Check, null,
-                            Modifier.size(20.dp).graphicsLayer { alpha = shown; scaleX = 0.5f + shown / 2; scaleY = 0.5f + shown / 2 },
-                            colorFilter = ColorFilter.tint(LocalAccent.current),
+                        Icon(
+                            Glyph.Check, LocalAccent.current,
+                            Modifier.graphicsLayer { alpha = shown; scaleX = 0.5f + shown / 2; scaleY = 0.5f + shown / 2 },
+                            size = 20.dp,
                         )
                     }
                     if (i < options.lastIndex) Spacer(Modifier.size(2.dp))
@@ -146,16 +146,17 @@ fun <T> Choice(
 @Composable
 fun Disclosure(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val turn by animateFloatAsState(if (open) 90f else 0f, Motion.travel(), label = "chevron")
+    val turn = animateFloatAsState(if (open) 90f else 0f, Motion.travel(), label = "chevron")
     Column(modifier.fillMaxWidth().background(Tone.Panel)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                .semantics { stateDescription = folded(open) }
                 .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
                 .padding(horizontal = Space.S4),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-            Image(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
+            Icon(Glyph.Right, Ink.Three, Modifier.graphicsLayer { rotationZ = turn.value }, size = 16.dp)
         }
         AnimatedVisibility(
             open,
@@ -166,6 +167,8 @@ fun Disclosure(title: String, modifier: Modifier = Modifier, content: @Composabl
         }
     }
 }
+
+private fun folded(open: Boolean) = if (open) tr("Expanded", "Rozwinięte") else tr("Collapsed", "Zwinięte")
 
 @Composable
 fun PageTitle(

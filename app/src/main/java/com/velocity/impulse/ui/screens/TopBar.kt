@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -87,9 +88,9 @@ import com.velocity.impulse.data.Probe
 import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
+import com.velocity.impulse.ui.Pill
 import com.velocity.impulse.ui.Shell
 import com.velocity.impulse.ui.Surface
-import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Field
 import com.velocity.impulse.ui.components.Glyph
@@ -99,7 +100,6 @@ import com.velocity.impulse.ui.components.MorphSource
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
-import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.flightLanding
 import com.velocity.impulse.ui.components.glass
@@ -126,7 +126,7 @@ private val HeadShape = Squircle(Radius.Card)
 private val Island = androidx.compose.foundation.shape.RoundedCornerShape(percent = 50)
 
 /** The same tone as the conversation, so the band is invisible until something scrolls under it. */
-private val Band = HazeStyle(Tone.App, HazeTint(Tone.App.copy(alpha = 0.58f)), blurRadius = 20.dp, noiseFactor = 0f)
+private fun band() = HazeStyle(Tone.App, HazeTint(Tone.App.copy(alpha = 0.58f)), blurRadius = 20.dp, noiseFactor = 0f)
 
 private fun same(a: String?, b: String?) =
     a != null && b != null && a.replace('\\', '/').equals(b.replace('\\', '/'), ignoreCase = true)
@@ -160,7 +160,7 @@ private fun Modifier.frostBand(shell: Shell): Modifier =
             drawContent()
             drawRect(Brush.verticalGradient(0.62f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
         }
-        .then(if (Build.VERSION.SDK_INT >= 31) Modifier.hazeChild(shell.cardHaze, Band) else Modifier.background(Tone.App.copy(alpha = 0.92f)))
+        .then(if (Build.VERSION.SDK_INT >= 31) Modifier.hazeChild(shell.cardHaze, band()) else Modifier.background(Tone.App.copy(alpha = 0.92f)))
 
 /** Ordered from worst to best, so the label rolls up when things get better. */
 private enum class Kind { Offline, None, Loading, Ready }
@@ -216,7 +216,11 @@ private fun Heading(m: AppModel, shell: Shell, modifier: Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(Modifier.flightLanding(shell.flight)) {
-                Roll(title ?: tr("New chat", "Nowy czat"), Type.Body.copy(fontWeight = FontWeight.SemiBold), up = shell.sceneDir > 0)
+                Roll(
+                    title ?: if (m.temporary) tr("Temporary chat", "Czat tymczasowy") else tr("New chat", "Nowy czat"),
+                    Type.Body.copy(fontWeight = FontWeight.SemiBold),
+                    up = shell.sceneDir > 0,
+                )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AnimatedVisibility(
@@ -242,29 +246,39 @@ private fun Heading(m: AppModel, shell: Shell, modifier: Modifier) {
     }
 }
 
-/** One island: a pencil for a new chat (only once this one has started) and the dots for its details. */
+/**
+ * One island. Before the first message it holds the temporary-chat switch; once the chat has
+ * started, a pencil for a new chat and the dots for its details. Each button folds in and out
+ * of the capsule rather than popping.
+ */
 @Composable
 private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
+    val accent = LocalAccent.current
+    val view = LocalView.current
     val empty = m.current == null
-    val pen = animateFloatAsState(if (empty) 0f else 1f, if (shell.calm) tween(Motion.M2) else spring(0.78f, 520f), label = "pen")
+    val spec = if (shell.calm) tween<Float>(Motion.M2) else spring<Float>(0.78f, 520f)
+    val started = animateFloatAsState(if (empty) 0f else 1f, spec, label = "started")
+    val temporary = m.temporary
+    val dot by animateColorAsState(if (temporary) accent.copy(alpha = 0.2f) else Color.Transparent, tween(Motion.M2), label = "temporary")
     Row(
         modifier.height(44.dp).glass(shell.cardHaze, Island).padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .layout { measurable, constraints ->
-                    val p = measurable.measure(constraints)
-                    layout((p.width * pen.value.coerceIn(0f, 1.08f)).roundToInt(), p.height) { p.place(0, 0) }
-                }
-                .graphicsLayer {
-                    val k = pen.value.coerceIn(0f, 1f)
-                    alpha = k
-                    if (shell.calm) return@graphicsLayer
-                    scaleX = 0.5f + 0.5f * pen.value
-                    scaleY = scaleX
-                },
-        ) {
+        Fold(shell, { 1f - started.value }) {
+            Box(
+                Modifier.size(40.dp).pressable(
+                    {
+                        view.feel(if (temporary) Feel.Off else Feel.On)
+                        m.newChat(!temporary)
+                    },
+                    CircleShape, dot, Tone.Raise, depth = 0.88f, enabled = empty, stretch = true, feel = null, role = Role.Switch,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Glyph.EyeOff, if (temporary) accent else Ink.One, size = 19.dp)
+            }
+        }
+        Fold(shell, { started.value }) {
             Box(
                 Modifier.size(40.dp).pressable(
                     { shell.newChat() }, CircleShape, Color.Transparent, Tone.Raise,
@@ -275,8 +289,29 @@ private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
                 Image(painterResource(R.drawable.ph_pencil_simple_bold), tr("New chat", "Nowy czat"), Modifier.size(19.dp), colorFilter = ColorFilter.tint(Ink.One))
             }
         }
-        IconBtn(Glyph.More, shell::openDetails, tint = Ink.One, fill = Color.Transparent, size = 40.dp, enabled = !empty, island = true)
+        Fold(shell, { started.value }) {
+            IconBtn(Glyph.More, shell::openDetails, tint = Ink.One, fill = Color.Transparent, size = 40.dp, enabled = !empty, island = true)
+        }
     }
+}
+
+/** A button that takes [shown] of its width in the capsule and scales with it; layout reads it, composition does not. */
+@Composable
+private fun Fold(shell: Shell, shown: () -> Float, content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints)
+                layout((p.width * shown().coerceIn(0f, 1.08f)).roundToInt(), p.height) { p.place(0, 0) }
+            }
+            .graphicsLayer {
+                val k = shown()
+                alpha = k.coerceIn(0f, 1f)
+                if (shell.calm) return@graphicsLayer
+                scaleX = 0.5f + 0.5f * k
+                scaleY = scaleX
+            },
+    ) { content() }
 }
 
 @Composable
@@ -322,7 +357,7 @@ private val Publishers = listOf(
     "lfm" to "Liquid AI",
 ).map { (test, name) -> Regex(test, RegexOption.IGNORE_CASE) to name }
 
-private fun publisherOf(p: Probe): String? = "${p.name} ${p.family}".let { s -> Publishers.firstOrNull { it.first.containsMatchIn(s) }?.second }
+internal fun publisherOf(p: Probe): String? = "${p.name} ${p.family}".let { s -> Publishers.firstOrNull { it.first.containsMatchIn(s) }?.second }
 
 /** The search field shows up once the list no longer fits at a glance. */
 private const val Searchable = 6
@@ -459,7 +494,7 @@ private fun Hero(m: AppModel, l: Loaded?) {
             }
             if (l != null) {
                 Spacer(Modifier.width(Space.S2))
-                Btn(tr("Unload", "Zwolnij"), { m.unload() }, variant = Variant.Quiet, height = 36.dp, enabled = m.loading == null)
+                Pill(tr("Unload", "Zwolnij"), { m.unload() }, enabled = m.loading == null, height = 36.dp)
             }
         }
         if (l != null) {

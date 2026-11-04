@@ -44,6 +44,12 @@ class Tools(private val api: Impulse, private val web: Boolean, private val plug
 
     val any get() = defs.length() > 0
 
+    /** The plugins offered, by server name. */
+    val servers: List<String> get() = plugins.map { it.optString("server_name") }.filter { it.isNotBlank() }.distinct()
+
+    /** What the answer was offered, for its `meta.tools`: "web" and the plugin servers. */
+    val offered: List<String> get() = (if (web) listOf("web") else emptyList()) + servers
+
     /** Runs one call and returns what the model reads. [show] says what is happening, for the person watching. */
     suspend fun call(name: String, args: JSONObject, show: (String) -> Unit): String = when (name) {
         "web_search" -> search(args.optString("query").trim(), show)

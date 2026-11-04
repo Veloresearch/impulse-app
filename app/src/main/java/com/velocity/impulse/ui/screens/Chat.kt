@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
@@ -29,16 +30,25 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.ReceiveContentListener
+import androidx.compose.foundation.content.TransferableContent
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -77,11 +87,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.KeyboardActionHandler
+import androidx.compose.foundation.text.input.TextFieldBuffer
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -91,6 +111,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,10 +123,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -114,11 +139,12 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -134,7 +160,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -155,6 +181,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Attachment
 import com.velocity.impulse.data.Chat
+import com.velocity.impulse.data.Live
 import com.velocity.impulse.data.Message
 import com.velocity.impulse.data.Step
 import com.velocity.impulse.data.Tools
@@ -162,9 +189,12 @@ import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Surface
+import com.velocity.impulse.ui.components.Backdrop
+import com.velocity.impulse.ui.components.BackdropMood
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.CopyButton
 import com.velocity.impulse.ui.components.Feel
+import com.velocity.impulse.ui.components.announce
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
@@ -177,14 +207,17 @@ import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
 import com.velocity.impulse.ui.components.morph
+import com.velocity.impulse.ui.components.openPage
 import com.velocity.impulse.ui.components.plainText
 import com.velocity.impulse.ui.components.pressable
+import com.velocity.impulse.ui.components.strokeMark
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Squircle
+import com.velocity.impulse.ui.theme.Theme
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import kotlinx.coroutines.delay
@@ -192,6 +225,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
@@ -216,9 +250,22 @@ private class Toast {
     }
 }
 
+/** One chat's composer: its words, what goes with them, and the sent message being edited. */
+@Stable
+private class Draft(val chatId: String?, text: String) {
+    val field = TextFieldState(text)
+    val attached = mutableStateListOf<Attachment>()
+    var editing by mutableStateOf<Message?>(null)
+
+    /** The words that were in the field before an edit took it, back on cancel. */
+    var aside = ""
+    val focus = FocusRequester()
+}
+
 /**
- * The main screen: the conversation on stage, the frosted composer below it. Another chat or a
- * new one takes the stage as a choreographed scene change; the composer never moves for it.
+ * The main screen: the conversation on stage over its living backdrop, the frosted composer
+ * below. Another chat or a new one takes the stage as a choreographed scene change; the composer
+ * never moves for it.
  */
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -228,7 +275,10 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
     val ime = WindowInsets.ime
     val nav = WindowInsets.navigationBars
     val bar = WindowInsets.statusBars
+    val keyboard = LocalSoftwareKeyboardController.current
     val toast = remember { Toast() }
+    val draft = remember(m.current) { Draft(m.current, m.draft(m.current)) }
+    val landed = remember { mutableIntStateOf(0) }
     var composerH by remember { mutableIntStateOf(0) }
     val front = remember { mutableStateOf<LazyListState?>(null) }
     val far = with(d) { 48.dp.toPx() }
@@ -239,6 +289,20 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
     val scenes = updateTransition(key, "scene")
     val rise = with(d) { 40.dp.roundToPx() }
     val scope = rememberCoroutineScope()
+    val mood by remember { derivedStateOf { moodOf(m.live) } }
+    val fresh by remember { derivedStateOf { (m.chat?.raw?.optJSONArray("messages")?.length() ?: 0) == 0 } }
+    val bare by remember(draft) { derivedStateOf { draft.field.text.isEmpty() && draft.attached.isEmpty() && draft.editing == null } }
+    val lift: Density.() -> Float = { -(ime.getBottom(this) - nav.getBottom(this)).coerceAtLeast(0).toFloat() }
+    val write: (String) -> Unit = { words ->
+        draft.field.setTextAndPlaceCursorAtEnd(words)
+        runCatching { draft.focus.requestFocus() }
+        keyboard?.show()
+    }
+    val edit: (Message) -> Unit = { msg ->
+        if (draft.editing == null) draft.aside = draft.field.text.toString()
+        draft.editing = msg
+        write(msg.text)
+    }
 
     Box(
         modifier.fillMaxSize().drawWithContent {
@@ -247,24 +311,32 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
             drawRect(Brush.verticalGradient(0f to Tone.App.copy(alpha = 0.9f), 1f to Color.Transparent, endY = h), size = Size(size.width, h))
         },
     ) {
-        Box(Modifier.fillMaxSize().graphicsLayer { translationY = -(ime.getBottom(this) - nav.getBottom(this)).coerceAtLeast(0).toFloat() }) {
-            scenes.AnimatedContent(
-                Modifier.fillMaxSize(),
-                transitionSpec = { sceneChange(shell.calm, rise) },
-                contentKey = { it.first },
-            ) { k ->
-                val live = k.first == scenes.targetState.first
-                Scene(
-                    m,
-                    chatId = if (live) m.current else k.second,
-                    live = live,
-                    blurOut = !live && !shell.calm && scenes.targetState.second == null,
-                    front = front,
-                    composerH = { composerH },
-                    toast = toast,
-                )
+        Box(Modifier.fillMaxSize().glassSource(shell.cardHaze)) {
+            Backdrop(state = { mood })
+            Box(Modifier.fillMaxSize().graphicsLayer { translationY = lift() }) {
+                scenes.AnimatedContent(
+                    Modifier.fillMaxSize(),
+                    transitionSpec = { sceneChange(shell.calm, rise) },
+                    contentKey = { it.first },
+                ) { k ->
+                    val live = k.first == scenes.targetState.first
+                    Scene(
+                        m,
+                        chatId = if (live) m.current else k.second,
+                        live = live,
+                        blurOut = !live && !shell.calm && scenes.targetState.second == null,
+                        front = front,
+                        composerH = { composerH },
+                        toast = toast,
+                        landed = landed,
+                        edit = edit,
+                    )
+                }
             }
-            Composer(m, toast) { composerH = it }
+        }
+        Box(Modifier.fillMaxSize().graphicsLayer { translationY = lift() }) {
+            Starters(fresh && bare && m.status?.model != null, { composerH + 4.dp.roundToPx() }, write)
+            Composer(m, toast, draft, landed) { composerH = it }
             AnimatedVisibility(
                 jump,
                 Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -(composerH + 12.dp.roundToPx())) },
@@ -278,6 +350,14 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
             ToastIsland(toast) { composerH + (if (jump) 64.dp else 12.dp).roundToPx() }
         }
     }
+}
+
+/** How the room behind the conversation feels: still, thinking, using a tool or writing. */
+private fun moodOf(l: Live?): BackdropMood = when {
+    l == null -> BackdropMood.Idle
+    l.step != null -> BackdropMood.Tool
+    l.text.isNotEmpty() -> BackdropMood.Writing
+    else -> BackdropMood.Thinking
 }
 
 private fun AnimatedContentTransitionScope<Pair<Int, String?>>.sceneChange(calm: Boolean, rise: Int): ContentTransform = when {
@@ -298,10 +378,12 @@ private fun AnimatedContentScope.Scene(
     front: MutableState<LazyListState?>,
     composerH: () -> Int,
     toast: Toast,
+    landed: MutableIntState,
+    edit: (Message) -> Unit,
 ) {
     val shell = LocalShell.current
     val d = LocalDensity.current
-    val chat by remember(chatId) { derivedStateOf { m.chats.firstOrNull { it.id == chatId } } }
+    val chat by remember(chatId) { derivedStateOf { m.chats.firstOrNull { it.id == chatId } ?: m.chat?.takeIf { it.id == chatId } } }
     val items = remember(chat) { chat?.messages.orEmpty().asReversed() }
     val seen = remember { items.mapTo(HashSet()) { it.id } }
     val list = rememberLazyListState()
@@ -333,10 +415,60 @@ private fun AnimatedContentScope.Scene(
             label = "fresh",
         ) { has ->
             if (has) {
-                Messages(m, chat, items, seen, list, live, composerH, toast)
+                Messages(m, chat, items, seen, list, composerH, toast, landed, edit)
             } else {
                 val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 Greeting(m, Modifier.fillMaxSize().padding(top = top + Chrome.Top, bottom = with(d) { composerH().toDp() }))
+            }
+        }
+    }
+}
+
+private class Starter(val title: String, val hint: String, val words: String, val mark: @Composable (Color) -> Unit)
+
+/** Ways to begin, floating over the empty chat; a tap starts the question in the composer. */
+@Composable
+private fun BoxScope.Starters(visible: Boolean, lift: Density.() -> Int, onPick: (String) -> Unit) {
+    val calm = LocalShell.current.calm
+    val accent = LocalAccent.current
+    val list = remember {
+        listOf(
+            Starter(tr("Help me write", "Pomóż mi napisać"), tr("an email, a post, a note", "mail, post, notatkę"), tr("Help me write ", "Pomóż mi napisać ")) { Drawn(DrawScope::penMark, it) },
+            Starter(tr("Brainstorm", "Burza mózgów"), tr("ideas for anything", "pomysły na wszystko"), tr("Brainstorm ideas for ", "Wymyśl pomysły na ")) { Icon(Glyph.Sparkle, it, size = 18.dp) },
+            Starter(tr("Explain", "Wyjaśnij"), tr("anything, simply", "cokolwiek, prosto"), tr("Explain ", "Wyjaśnij ")) { Icon(Glyph.Brain, it, size = 18.dp) },
+            Starter(tr("Write code", "Napisz kod"), tr("a script, a fix, a query", "skrypt, poprawkę, zapytanie"), tr("Write code that ", "Napisz kod, który ")) { Drawn(DrawScope::codeMark, it) },
+            Starter(tr("Search the web", "Szukaj w sieci"), tr("what is happening now", "co dzieje się teraz"), tr("Search the web for ", "Wyszukaj w sieci ")) { Icon(Glyph.Globe, it, size = 18.dp) },
+            Starter(tr("Work out", "Policz"), tr("numbers, plans, budgets", "liczby, plany, budżety"), tr("Work out ", "Policz ")) { Drawn(DrawScope::sumMark, it) },
+        )
+    }
+    AnimatedVisibility(
+        visible,
+        Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -lift()) },
+        enter = fadeIn(tween(Motion.M2)),
+        exit = fadeOut(tween(Motion.M1)) + slideOutVertically(tween(Motion.M2, easing = Motion.Leave)) { it / 4 },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            list.forEachIndexed { i, s ->
+                Column(
+                    Modifier
+                        .animateEnterExit(
+                            enter = if (calm) EnterTransition.None else fadeIn(tween(Motion.M2, delayMillis = 50 * i)) +
+                                slideInVertically(spring(0.78f, 300f)) { it / 2 } + scaleIn(spring(0.78f, 300f), 0.92f),
+                            exit = ExitTransition.None,
+                        )
+                        .width(148.dp)
+                        .shadow(10.dp, Shapes.Card, clip = false, ambientColor = Color.Black.copy(alpha = 0.16f * Theme.palette.shade), spotColor = Color.Black.copy(alpha = 0.24f * Theme.palette.shade))
+                        .pressable({ onPick(s.words) }, Shapes.Card, Tone.Float, Tone.Raise, depth = 0.96f, tilt = 6f)
+                        .padding(14.dp),
+                ) {
+                    s.mark(accent)
+                    Spacer(Modifier.height(12.dp))
+                    BasicText(s.title, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    BasicText(s.hint, style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -350,33 +482,63 @@ private fun Messages(
     items: List<Message>,
     seen: HashSet<String>,
     list: LazyListState,
-    source: Boolean,
     composerH: () -> Int,
     toast: Toast,
+    landed: MutableIntState,
+    edit: (Message) -> Unit,
 ) {
-    val shell = LocalShell.current
     val d = LocalDensity.current
-    val calm = shell.calm
-    val liveId by remember { derivedStateOf { m.live?.messageId } }
+    val calm = LocalShell.current.calm
+    val scope = rememberCoroutineScope()
+    val chatId = chat?.id
+    val liveId by remember(chatId) { derivedStateOf { chatId?.let { m.lives[it] }?.messageId } }
+    val busy = liveId != null
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val typing = with(d) { (WindowInsets.imeAnimationTarget.getBottom(d) - WindowInsets.navigationBars.getBottom(d)).coerceAtLeast(0).toDp() }
     val rise = with(d) { 56.dp.roundToPx() }
     val near = with(d) { 48.dp.toPx() }
     val atBottom = remember(list) { { list.firstVisibleItemIndex == 0 } }
+    val now = rememberUpdatedState(items)
+    val view = LocalView.current
+    LaunchedEffect(chatId) {
+        var was: String? = null
+        snapshotFlow { liveId }.collect { id ->
+            val done = was
+            was = id
+            if (id == null && done != null) now.value.firstOrNull { it.id == done }?.let { view.announce(plainText(it.text)) }
+        }
+    }
+    val land: () -> Unit = { landed.intValue++ }
+    val jump: (String) -> Unit = { id ->
+        now.value.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { list.animateScrollToItem(it) } }
+    }
 
-    // New messages land below the item the list is anchored to; follow them when the reader was at the end.
+    // What you send always brings you down to it, wherever you were.
+    val sent = remember { intArrayOf(landed.intValue) }
+    LaunchedEffect(landed.intValue) {
+        if (landed.intValue == sent[0]) return@LaunchedEffect
+        sent[0] = landed.intValue
+        list.animateScrollToItem(0)
+    }
+    // Anything else that arrives is followed only when the reader was already at the end.
     val count = remember { intArrayOf(items.size) }
     LaunchedEffect(items.size) {
         val added = items.size - count[0]
         count[0] = items.size
-        if (added <= 0) return@LaunchedEffect
-        // Your own message always brings you down to it; others follow only if you were already there.
-        if (items.take(added).any { it.role == "user" }) list.animateScrollToItem(0)
-        else if (list.firstVisibleItemIndex == added && list.firstVisibleItemScrollOffset < near) list.scrollToItem(0)
+        if (added > 0 && list.firstVisibleItemIndex == added && list.firstVisibleItemScrollOffset < near) list.scrollToItem(0)
+    }
+    LaunchedEffect(chatId) {
+        val id = chatId ?: return@LaunchedEffect
+        m.anchor(id)?.let { a -> now.value.indexOfFirst { it.id == a }.takeIf { it > 0 }?.let { list.scrollToItem(it) } }
+        snapshotFlow { list.firstVisibleItemIndex.takeIf { it > 0 }?.let { now.value.getOrNull(it)?.id } }
+            .collectLatest { a ->
+                delay(800)
+                m.keepAnchor(id, a)
+            }
     }
 
     LazyColumn(
-        Modifier.fillMaxSize().then(if (source) Modifier.glassSource(shell.cardHaze) else Modifier),
+        Modifier.fillMaxSize(),
         state = list,
         reverseLayout = true,
         contentPadding = PaddingValues(
@@ -387,119 +549,280 @@ private fun Messages(
         ),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        itemsIndexed(items, key = { _, msg -> msg.id }) { i, msg ->
+        itemsIndexed(items, key = { _, msg -> msg.id }, contentType = { _, msg -> msg.role }) { i, msg ->
             val user = msg.role == "user"
             // Only a message that arrives while the chat is open animates in; scrolling never pays for it.
             val fresh = remember { seen.add(msg.id) }
+            val body = @Composable {
+                if (user) {
+                    UserBubble(m, msg, orphan = i == 0 && !busy, canEdit = !busy && chatId == m.current, toast, land, edit)
+                } else {
+                    Answer(m, chat, msg, msg.id == liveId, i == 0, atBottom, toast, land, jump)
+                }
+            }
             if (!fresh) {
-                if (user) UserBubble(msg, toast) else Answer(m, chat, msg, msg.id == liveId, i == 0, atBottom, toast)
-            } else AnimatedVisibility(
-                visibleState = remember { MutableTransitionState(false).apply { targetState = true } },
-                enter = when {
-                    calm -> fadeIn(tween(Motion.M2))
-                    user -> slideInVertically(spring(0.82f, 420f)) { rise } +
-                        scaleIn(spring(0.82f, 420f), 0.94f, TransformOrigin(1f, 1f)) +
-                        fadeIn(tween(Motion.M2, easing = Motion.Out))
-                    else -> fadeIn(tween(Motion.M3))
-                },
-            ) {
-                if (user) UserBubble(msg, toast) else Answer(m, chat, msg, msg.id == liveId, i == 0, atBottom, toast)
+                body()
+            } else {
+                AnimatedVisibility(
+                    visibleState = remember { MutableTransitionState(false).apply { targetState = true } },
+                    enter = when {
+                        calm -> fadeIn(tween(Motion.M2))
+                        user -> slideInVertically(spring(0.82f, 420f)) { rise } +
+                            scaleIn(spring(0.82f, 420f), 0.94f, TransformOrigin(1f, 1f)) +
+                            fadeIn(tween(Motion.M2, easing = Motion.Out))
+                        else -> fadeIn(tween(Motion.M3))
+                    },
+                ) { body() }
             }
         }
     }
 }
 
 private val Bubble = Squircle(22.dp)
+private val Capsule = RoundedCornerShape(percent = 50)
 
+/** A message taller than about fifteen lines shows its first part fading out, with "Show all" under it. */
 @Composable
-private fun UserBubble(msg: Message, toast: Toast) {
-    val clip = LocalClipboardManager.current
-    val files = remember(msg) { msg.raw.optJSONArray("files").let { a -> if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) } } }
-    Column(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalAlignment = Alignment.End) {
-        if (files.isNotEmpty()) SentFiles(files)
-        if (msg.text.isNotBlank()) BasicText(
-            msg.text,
-            Modifier.pressable(
-                {}, Bubble, Tone.Raise, Tone.Hover, depth = 1f, feel = null,
-                onLong = {
-                    clip.setText(AnnotatedString(msg.text))
-                    toast.show(tr("Copied", "Skopiowano"))
-                },
+private fun Fold(content: @Composable () -> Unit) {
+    val calm = LocalShell.current.calm
+    val accent = LocalAccent.current
+    val d = LocalDensity.current
+    val limit = with(d) { 360.dp.roundToPx() }
+    val short = with(d) { 220.dp.roundToPx() }
+    var full by remember { mutableIntStateOf(0) }
+    var open by rememberSaveable { mutableStateOf(false) }
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(open) {
+        val to = if (open) 1f else 0f
+        if (calm) t.snapTo(to) else t.animateTo(to, spring(1f, 420f))
+    }
+    val folds = full > limit
+    Column {
+        Box(
+            Modifier.clipToBounds()
+                .layout { measurable, c ->
+                    val p = measurable.measure(c.copy(maxHeight = Constraints.Infinity))
+                    val h = if (p.height > limit) (short + (p.height - short) * t.value).roundToInt() else p.height
+                    layout(p.width, h) { p.place(0, 0) }
+                }
+                .then(
+                    if (!folds) {
+                        Modifier
+                    } else {
+                        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
+                            drawContent()
+                            val k = 1f - t.value
+                            if (k > 0.01f) {
+                                val h = 56.dp.toPx()
+                                drawRect(
+                                    Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = k), startY = size.height - h, endY = size.height),
+                                    Offset(0f, size.height - h), Size(size.width, h), blendMode = BlendMode.DstOut,
+                                )
+                            }
+                        }
+                    },
+                ),
+        ) {
+            Box(Modifier.onSizeChanged { full = it.height }) { content() }
+        }
+        if (folds) {
+            BasicText(
+                if (open) tr("Show less", "Pokaż mniej") else tr("Show all", "Pokaż całość"),
+                Modifier.padding(top = 8.dp).pressable({ open = !open }, depth = 1f, feel = Feel.Tick),
+                style = Type.Meta.copy(color = accent, fontWeight = FontWeight.Medium),
             )
-                .padding(horizontal = 18.dp, vertical = 12.dp),
-            style = Type.Body,
-        )
+        }
     }
 }
 
-@Immutable
-private data class Think(val has: Boolean, val active: Boolean, val since: Long, val textAt: Long)
-
-/** What the tools are doing for the live answer: the step now, and the pages seen so far. */
-@Immutable
-private data class ToolNow(val step: String?, val links: List<Pair<String, String>>)
-
 @Composable
-private fun Answer(m: AppModel, chat: Chat?, msg: Message, isLive: Boolean, last: Boolean, atBottom: () -> Boolean, toast: Toast) {
-    val id = msg.id
-    val current = rememberUpdatedState(msg)
-    var revealing by remember { mutableStateOf(isLive) }
-    LaunchedEffect(isLive) { if (isLive) revealing = true }
-    val sentHere = remember { isLive }
-    val think by remember {
-        derivedStateOf {
-            m.live?.takeIf { it.messageId == id }?.let {
-                Think(it.thought.isNotBlank(), it.thought.isNotBlank() && it.text.isEmpty() && it.step == null, it.thoughtAt, it.textAt)
+private fun UserBubble(
+    m: AppModel,
+    msg: Message,
+    orphan: Boolean,
+    canEdit: Boolean,
+    toast: Toast,
+    land: () -> Unit,
+    edit: (Message) -> Unit,
+) {
+    val clip = LocalClipboardManager.current
+    val files = remember(msg) { msg.raw.optJSONArray("files").let { a -> if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) } } }
+    var menu by remember { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalAlignment = Alignment.End) {
+        if (files.isNotEmpty()) SentFiles(files)
+        if (msg.text.isNotBlank()) {
+            Box {
+                val words = @Composable { Fold { BasicText(msg.text, style = Type.Body) } }
+                Box(
+                    (if (selecting) Modifier.background(Tone.Raise, Bubble) else Modifier.pressable({}, Bubble, Tone.Raise, Tone.Hover, depth = 1f, feel = null, onLong = { menu = true }))
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                ) {
+                    if (selecting) SelectionContainer { words() } else words()
+                }
+                MoreMenu(
+                    menu,
+                    { menu = false },
+                    listOfNotNull(
+                        if (canEdit) MenuRow(tr("Edit", "Edytuj"), { Drawn(DrawScope::penMark, Ink.One) }) { edit(msg) } else null,
+                        MenuRow(tr("Copy", "Kopiuj"), { Icon(Glyph.Copy, Ink.One, size = 18.dp) }) {
+                            clip.setText(AnnotatedString(msg.text))
+                            toast.show(tr("Copied", "Skopiowano"))
+                        },
+                        MenuRow(tr("Select text", "Zaznacz tekst"), { Drawn(DrawScope::cursorMark, Ink.One) }) {
+                            selecting = true
+                            toast.show(tr("Hold a word, then drag to select", "Przytrzymaj słowo i przeciągnij"))
+                        },
+                    ),
+                    end = true,
+                )
+            }
+        }
+        AnimatedVisibility(
+            selecting || orphan,
+            enter = fadeIn(tween(Motion.M2)) + expandVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+            exit = fadeOut(tween(Motion.M1)) + shrinkVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+        ) {
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (selecting) CapsuleBtn(tr("Done", "Gotowe"), { selecting = false })
+                if (orphan && !selecting) {
+                    CapsuleBtn(tr("Send again", "Wyślij ponownie"), {
+                        m.resend(msg.id)
+                        land()
+                    }) { Icon(Glyph.Refresh, Ink.Two, size = 14.dp) }
+                }
             }
         }
     }
-    // Between the stream closing and the chat taking the final text, the last live picture holds.
-    val held = remember { arrayOfNulls<Think>(1) }
-    val t = think?.also { held[0] = it } ?: held[0].takeIf { revealing }
-    val thought = remember { { m.live?.takeIf { it.messageId == id }?.thought ?: current.value.thought } }
-    val tool by remember { derivedStateOf { m.live?.takeIf { it.messageId == id }?.let { ToolNow(it.step, it.links) } } }
+}
+
+private enum class Stance { Idle, Waiting, Thinking, Answering }
+
+/** Where a live answer stands. Words past what the message already held (a continued answer keeps its own) mean it is answering. */
+private fun phaseOf(l: Live?, msg: Message): Stance = when {
+    l == null -> Stance.Idle
+    l.thought.isBlank() -> Stance.Waiting
+    l.step == null && l.text.length > msg.text.length -> Stance.Answering
+    else -> Stance.Thinking
+}
+
+/**
+ * The thinking block's own clock. It opens when the model starts thinking and stays open through
+ * tool steps and further thinking; only words that stay close it, so a sentence the model writes
+ * before calling a tool (and that is taken back) never makes it blink.
+ */
+@Stable
+private class Thought {
+    var active by mutableStateOf(false)
+        private set
+    var since by mutableLongStateOf(0L)
+        private set
+
+    /** How long it thought, measured here; the stored figure stands in until there is one. */
+    var took by mutableLongStateOf(0L)
+        private set
+
+    suspend fun follow(p: Stance, at: Long) {
+        when (p) {
+            Stance.Thinking -> {
+                if (at > 0) since = at
+                active = true
+            }
+            Stance.Answering, Stance.Idle -> if (active) {
+                val end = System.currentTimeMillis()
+                if (p == Stance.Answering) delay(160)
+                active = false
+                if (since > 0) took = end - since
+            }
+            Stance.Waiting -> Unit
+        }
+    }
+}
+
+/** What the tools are doing for the live answer: the step now, the pages seen so far, and whether the answer itself is being written. */
+@Immutable
+private data class ToolNow(val step: String?, val links: List<Pair<String, String>>, val writing: Boolean)
+
+@Composable
+private fun Answer(
+    m: AppModel,
+    chat: Chat?,
+    msg: Message,
+    isLive: Boolean,
+    last: Boolean,
+    atBottom: () -> Boolean,
+    toast: Toast,
+    land: () -> Unit,
+    jump: (String) -> Unit,
+) {
+    val id = msg.id
+    val chatId = chat?.id
+    val current = rememberUpdatedState(msg)
+    val live: () -> Live? = remember(chatId) { { chatId?.let { m.lives[it] }?.takeIf { it.messageId == id } } }
+    var revealing by remember { mutableStateOf(isLive) }
+    LaunchedEffect(isLive) { if (isLive) revealing = true }
+    val sentHere = remember { isLive }
+    val held = remember { arrayOf("") }
+    val thought = remember { { live()?.thought?.also { held[0] = it } ?: current.value.thought.ifBlank { held[0] } } }
+    val phase by remember { derivedStateOf { phaseOf(live(), current.value) } }
+    val think = remember { Thought() }
+    LaunchedEffect(phase) { think.follow(phase, live()?.thoughtAt ?: 0L) }
+    val thinks by remember {
+        derivedStateOf { live()?.thought?.isNotBlank() == true || current.value.thought.isNotBlank() || revealing && held[0].isNotBlank() }
+    }
+    val flowing by remember { derivedStateOf { live()?.step == null } }
+    val tool by remember { derivedStateOf { live()?.let { ToolNow(it.step, it.links, it.step == null && it.text.length > current.value.text.length) } } }
     val steps = remember(msg) { msg.steps }
     val sources = remember(msg) { msg.sources }
+    val earlier = remember(msg) { earlierOf(chat, msg) }
     val tooled = remember { booleanArrayOf(false) }
     var selecting by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf(false) }
+    val grow = expandVertically(spring(1f, 420f, IntSize.VisibilityThreshold))
+    val shrink = shrinkVertically(spring(1f, 500f, IntSize.VisibilityThreshold))
 
     Column(Modifier.fillMaxWidth()) {
-        if (m.showThinking && (t?.has ?: msg.thought.isNotBlank())) {
+        AnimatedVisibility(m.showThinking && thinks, enter = fadeIn(tween(Motion.M2)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
             Thinking(
                 thought,
-                active = t?.active == true,
-                since = t?.since ?: 0L,
-                tookMs = if (t != null && t.textAt > 0) t.textAt - t.since else msg.raw.optLong("thoughtMs"),
+                active = think.active,
+                flowing = flowing,
+                since = think.since,
+                tookMs = think.took.takeIf { it > 0 } ?: msg.raw.optLong("thoughtMs"),
+                startOpen = m.style.thinkOpen,
                 modifier = Modifier.padding(bottom = 10.dp),
             )
         }
         val now = tool
         // Once a tool has shown, its row stays until the answer settles, so it never blinks between steps.
         if (now != null && (now.step != null || now.links.isNotEmpty())) tooled[0] = true
-        if (now != null && tooled[0] || steps.isNotEmpty()) {
+        AnimatedVisibility(now != null && tooled[0] || steps.isNotEmpty(), enter = fadeIn(tween(Motion.M2)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
             ToolTrail(now, steps, sources.size, Modifier.padding(bottom = 10.dp))
         }
         if (revealing) {
-            LiveAnswer(m, id, current, atBottom) { revealing = false }
+            LiveAnswer(m, live, current, atBottom) { revealing = false }
         } else if (msg.text.isNotEmpty()) {
             Markdown(msg.text, sources = sources, selectable = selecting)
         }
-        msg.error?.let { ErrorBanner(m, it, last, sentHere) }
-        AnimatedVisibility(
-            !revealing && sources.isNotEmpty(),
-            enter = fadeIn(tween(Motion.M3)) + expandVertically(spring(1f, 500f)),
-            exit = fadeOut(tween(Motion.M1)) + shrinkVertically(tween(Motion.M1)),
-        ) {
+        msg.error?.let { e ->
+            ErrorBanner(e, if (last && !revealing) ({ m.retry(id); land() }) else null, sentHere)
+        }
+        AnimatedVisibility(!revealing && last && msg.cut && msg.error == null, enter = fadeIn(tween(Motion.M3)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
+            CapsuleBtn(tr("Continue", "Kontynuuj"), { m.continueAnswer(); land() }, Modifier.padding(top = 12.dp)) {
+                Icon(Glyph.Right, Ink.Two, size = 14.dp)
+            }
+        }
+        AnimatedVisibility(!revealing && sources.isNotEmpty(), enter = fadeIn(tween(Motion.M3)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
             SourceChips(sources)
         }
-        AnimatedVisibility(
-            !revealing,
-            enter = fadeIn(tween(Motion.M3)) + expandVertically(spring(1f, 500f)),
-            exit = fadeOut(tween(Motion.M1)) + shrinkVertically(tween(Motion.M1)),
-        ) {
+        AnimatedVisibility(!revealing && earlier.isNotEmpty(), enter = fadeIn(tween(Motion.M3)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
+            EarlierChips(earlier, jump)
+        }
+        AnimatedVisibility(!revealing, enter = fadeIn(tween(Motion.M3)) + grow, exit = fadeOut(tween(Motion.M1)) + shrink) {
             Actions(
                 m, chat, msg, last, toast,
+                busy = chatId != null && m.lives[chatId] != null,
+                retry = { m.retry(id); land() },
                 selecting = selecting,
                 onSelect = { on ->
                     selecting = on
@@ -523,31 +846,30 @@ private fun wordEnd(t: String, i: Int): Int {
  * and the block never jumps; the text below it recomposes once per word, the rest is drawn.
  */
 @Composable
-private fun LiveAnswer(m: AppModel, id: String, msg: State<Message>, atBottom: () -> Boolean, onDone: () -> Unit) {
+private fun LiveAnswer(m: AppModel, live: () -> Live?, msg: State<Message>, atBottom: () -> Boolean, onDone: () -> Unit) {
     val calm = LocalShell.current.calm
     val view = LocalView.current
     val held = remember { arrayOf("") }
     val text = remember {
         {
-            val l = m.live
+            val l = live()
             when {
-                l != null && l.messageId == id -> l.text.also { held[0] = it }
+                l != null -> l.text.also { held[0] = it }
                 msg.value.raw.optBoolean("streaming") -> held[0]
                 else -> msg.value.text
             }
         }
     }
-    val streaming = remember { { m.live?.messageId == id || msg.value.raw.optBoolean("streaming") } }
-    var at by remember { mutableFloatStateOf(max(0, text().length - 60).toFloat()) }
+    val streaming = remember { { live() != null || msg.value.raw.optBoolean("streaming") } }
+    // A continued answer already shows what it had; only a fresh one replays its last words.
+    var at by remember { mutableFloatStateOf(max(0, text().length - (if (msg.value.text.isEmpty()) 60 else 0)).toFloat()) }
     val caret = remember { Animatable(1f) }
     val cut by remember { derivedStateOf { wordEnd(text(), at.toInt()) } }
     val shown by remember { derivedStateOf { text().let { it.substring(0, min(cut, it.length)) } } }
     val start by remember { derivedStateOf { shown.indexOfLast { it.isWhitespace() } + 1 } }
-    val queued by remember { derivedStateOf { m.live?.takeIf { it.messageId == id }?.queued ?: 0 } }
+    val queued by remember { derivedStateOf { live()?.queued ?: 0 } }
     // The thinking block or a tool line already says it is working; the caret would say it twice.
-    val busy by remember {
-        derivedStateOf { m.live?.takeIf { it.messageId == id }?.let { it.step != null || (m.showThinking && it.thought.isNotBlank()) } == true }
-    }
+    val busy by remember { derivedStateOf { live()?.let { it.step != null || (m.showThinking && it.thought.isNotBlank()) } == true } }
     val edge = remember(calm) {
         if (calm) {
             { 1f }
@@ -620,10 +942,23 @@ private fun <S> AnimatedContentTransitionScope<S>.textRoll(calm: Boolean): Conte
             (slideOutVertically(tween(Motion.M1, easing = Motion.Leave)) { -it / 2 } + fadeOut(tween(90)))
     }
 
+/**
+ * The model's thinking. While it thinks: a shimmering "Thinking" with its seconds and the latest
+ * lines of the thought; the light rests while a tool works. After: "Thought for N s", which opens
+ * into the whole thought.
+ */
 @Composable
-private fun Thinking(thought: () -> String, active: Boolean, since: Long, tookMs: Long, modifier: Modifier = Modifier) {
+private fun Thinking(
+    thought: () -> String,
+    active: Boolean,
+    flowing: Boolean,
+    since: Long,
+    tookMs: Long,
+    startOpen: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val calm = LocalShell.current.calm
-    var open by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf(startOpen && !active) }
     LaunchedEffect(active) { if (active) open = false }
     val turn = animateFloatAsState(if (open && !active) 90f else 0f, spring(0.8f, 500f), label = "chevron")
     var secs by remember { mutableIntStateOf(0) }
@@ -640,16 +975,27 @@ private fun Thinking(thought: () -> String, active: Boolean, since: Long, tookMs
     } else {
         tr("Thought it through", "Przemyślane")
     }
+    val label = Type.Body.copy(color = Ink.Three)
 
     Column(modifier.fillMaxWidth()) {
         Row(
-            Modifier.pressable({ if (!active) open = !open }, depth = 0.98f, feel = if (active) null else Feel.Tick)
+            Modifier.pressable({ if (!active) open = !open }, depth = 1f, feel = if (active) null else Feel.Tick)
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AnimatedContent(active, transitionSpec = { textRoll(calm) using SizeTransform(clip = false) }, label = "think") { a ->
-                if (a) Shimmer(if (secs > 0) tr("Thinking · $secs s", "Myśli · $secs s") else tr("Thinking", "Myśli"), calm)
-                else BasicText(done, style = Type.Body.copy(color = Ink.Three), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (a) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Shimmer(tr("Thinking", "Myśli"), calm || !flowing)
+                        if (secs > 0) {
+                            BasicText(" · ", style = label)
+                            Roll("$secs", label, digits = true)
+                            BasicText(" s", style = label)
+                        }
+                    }
+                } else {
+                    Roll(done, label)
+                }
             }
             AnimatedVisibility(!active, enter = fadeIn(tween(Motion.M2)) + scaleIn(spring(0.6f, 600f), 0.6f), exit = fadeOut(tween(Motion.M1))) {
                 Icon(Glyph.Right, Ink.Three, Modifier.padding(start = 4.dp).graphicsLayer { rotationZ = turn.value }, size = 14.dp)
@@ -676,11 +1022,11 @@ private fun Thinking(thought: () -> String, active: Boolean, since: Long, tookMs
     }
 }
 
-/** A label with light passing through it from left to right, the way a phone says it is working. */
+/** A label with light passing through it from left to right, the way a phone says it is working; [still] rests it. */
 @Composable
-private fun Shimmer(text: String, calm: Boolean, style: TextStyle = Type.Body) {
-    if (calm) {
-        BasicText(text, style = style.copy(color = Ink.Two), maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun Shimmer(text: String, still: Boolean, style: TextStyle = Type.Body) {
+    if (still) {
+        BasicText(text, style = style.copy(color = Ink.Three), maxLines = 1, overflow = TextOverflow.Ellipsis)
         return
     }
     val sweep = rememberInfiniteTransition(label = "shimmer").animateFloat(
@@ -797,8 +1143,9 @@ private fun toolLabel(steps: List<Step>, sources: Int, pages: Int): String {
 }
 
 /**
- * What the tools did for an answer. While one works: its shimmering line and the pages arriving
- * under it. After: one quiet line that opens into the steps.
+ * What the tools did for an answer. While the model works: the step now (shimmering while it
+ * runs, resting between steps, so it never flips back and forth) and the pages arriving under it.
+ * Once the answer is being written: one quiet line that opens into the steps.
  */
 @Composable
 private fun ToolTrail(now: ToolNow?, steps: List<Step>, sources: Int, modifier: Modifier = Modifier) {
@@ -810,7 +1157,7 @@ private fun ToolTrail(now: ToolNow?, steps: List<Step>, sources: Int, modifier: 
     val lastLinks = remember { arrayOf(emptyList<Pair<String, String>>()) }
     now?.step?.let { lastStep[0] = it }
     now?.links?.takeIf { it.isNotEmpty() }?.let { lastLinks[0] = it }
-    val working = now?.step != null
+    val working = now != null && !now.writing && lastStep[0].isNotEmpty()
 
     Column(modifier.fillMaxWidth()) {
         AnimatedContent(working, transitionSpec = { textRoll(calm) using SizeTransform(clip = false) }, label = "tools") { w ->
@@ -820,7 +1167,7 @@ private fun ToolTrail(now: ToolNow?, steps: List<Step>, sources: Int, modifier: 
                     Icon(if (step.startsWith("Using")) Glyph.Models else Glyph.Globe, Ink.Three, size = 16.dp)
                     Spacer(Modifier.width(8.dp))
                     AnimatedContent(step, transitionSpec = { textRoll(calm) using SizeTransform(clip = false) }, label = "step") { s ->
-                        Shimmer(s, calm)
+                        Shimmer(s, calm || now?.step == null)
                     }
                 }
             } else {
@@ -828,7 +1175,7 @@ private fun ToolTrail(now: ToolNow?, steps: List<Step>, sources: Int, modifier: 
                 val glyph = steps.firstOrNull()?.let { toolGlyph(it.tool) } ?: if (plugin) Glyph.Models else Glyph.Globe
                 val label = if (steps.isEmpty() && lastLinks[0].isEmpty() && plugin) lastStep[0].replaceFirst("Using", "Used") else toolLabel(steps, sources, lastLinks[0].size)
                 Row(
-                    Modifier.pressable({ if (steps.isNotEmpty()) open = !open }, depth = 0.98f, feel = if (steps.isEmpty()) null else Feel.Tick)
+                    Modifier.pressable({ if (steps.isNotEmpty()) open = !open }, depth = 1f, feel = if (steps.isEmpty()) null else Feel.Tick)
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -902,7 +1249,7 @@ private fun LinkChips(links: List<Pair<String, String>>, calm: Boolean) {
                         scaleX = 0.8f + 0.2f * a.value
                         scaleY = scaleX
                     }
-                        .background(Tone.Raise, Chip)
+                        .background(Tone.Raise, Capsule)
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                         .widthIn(max = 160.dp),
                     style = Type.Label.copy(color = Ink.Two),
@@ -914,13 +1261,11 @@ private fun LinkChips(links: List<Pair<String, String>>, calm: Boolean) {
     }
 }
 
-private val Chip = Squircle(13.dp)
-
-/** The pages the answer cites, numbered as its [n]; a tap opens one in the browser. */
+/** The pages the answer cites, numbered as its [n]; a tap opens one. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SourceChips(sources: List<Pair<String, String>>) {
-    val uri = LocalUriHandler.current
+    val ctx = LocalContext.current
     val accent = LocalAccent.current
     FlowRow(
         Modifier.fillMaxWidth().padding(top = 14.dp),
@@ -930,7 +1275,7 @@ private fun SourceChips(sources: List<Pair<String, String>>) {
         sources.forEachIndexed { i, (_, url) ->
             Row(
                 Modifier.height(30.dp)
-                    .pressable({ runCatching { uri.openUri(url) } }, Squircle(15.dp), Tone.Raise, Tone.Press, depth = 0.95f, stretch = true)
+                    .pressable({ openPage(ctx, url) }, Capsule, Tone.Raise, Tone.Press, depth = 0.95f, stretch = true)
                     .padding(horizontal = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -942,22 +1287,100 @@ private fun SourceChips(sources: List<Pair<String, String>>) {
     }
 }
 
+/**
+ * The earlier messages of this chat an answer drew on, as (id, first words). A record the panel
+ * wrote names them; otherwise the receipt's `earlier` indexes what was sent, which is rebuilt
+ * here the way the turn was put together: the system prompt first, then one entry per turn.
+ */
+private fun earlierOf(chat: Chat?, msg: Message): List<Pair<String, String>> {
+    fun snippet(t: String) = t.replace(Regex("<think>[\\s\\S]*?(</think>|$)"), "").trim().take(80)
+    msg.raw.optJSONArray("earlier")?.let { a ->
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { it.optString("id") to snippet(it.optString("text")) }.filter { it.second.isNotBlank() }
+    }
+    val picked = msg.receipt?.optJSONArray("earlier") ?: return emptyList()
+    if (picked.length() == 0) return emptyList()
+    val all = chat?.messages ?: return emptyList()
+    val at = all.indexOfFirst { it.id == msg.id }
+    if (at <= 0) return emptyList()
+    val wire = mutableListOf<MutableList<String>>(mutableListOf())
+    var role = ""
+    for (x in all.subList(0, at)) {
+        if (x.role != "user" && x.role != "assistant") continue
+        if (x.role == "assistant" && x.error != null) continue
+        if (x.text.isBlank() && x.files.isEmpty()) continue
+        if (x.role == "user" && role == "user") {
+            wire += mutableListOf<String>()
+            role = "assistant"
+        }
+        if (x.role == role) wire.last() += x.id else wire += mutableListOf(x.id).also { role = x.role }
+    }
+    val ids = (0 until picked.length()).flatMap { wire.getOrNull(picked.optInt(it, -1)).orEmpty() }.distinct()
+    return ids.mapNotNull { id -> all.firstOrNull { it.id == id }?.let { it.id to snippet(it.text) } }.filter { it.second.isNotBlank() }
+}
+
+/** "From earlier in this chat": the messages an answer drew on, as chips that take you back to them. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ErrorBanner(m: AppModel, text: String, last: Boolean, fresh: Boolean) {
+private fun EarlierChips(earlier: List<Pair<String, String>>, jump: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 14.dp)) {
+        BasicText(tr("From earlier in this chat", "Wcześniej w tym czacie"), style = Type.Label)
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            earlier.forEach { (id, text) ->
+                Row(
+                    Modifier.height(30.dp)
+                        .pressable({ jump(id) }, Capsule, Tone.Raise, Tone.Press, depth = 0.95f, stretch = true)
+                        .padding(horizontal = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Glyph.Chat, Ink.Three, size = 12.dp)
+                    Spacer(Modifier.width(6.dp))
+                    BasicText(
+                        if (text.length > 28) text.take(28).trimEnd() + "…" else text,
+                        Modifier.widthIn(max = 200.dp),
+                        style = Type.Label.copy(color = Ink.Two),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A capsule control for one action in the conversation: try again, continue, done. */
+@Composable
+private fun CapsuleBtn(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: (@Composable () -> Unit)? = null) {
+    Row(
+        modifier.height(34.dp)
+            .pressable(onClick, Capsule, Tone.Raise, Tone.Press, depth = 0.95f, stretch = true)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            icon()
+            Spacer(Modifier.width(6.dp))
+        }
+        BasicText(text, style = Type.Meta.copy(color = Ink.One, fontWeight = FontWeight.Medium))
+    }
+}
+
+@Composable
+private fun ErrorBanner(text: String, retry: (() -> Unit)?, fresh: Boolean) {
     val view = LocalView.current
     val shown = remember { MutableTransitionState(!fresh).apply { targetState = true } }
     LaunchedEffect(Unit) { if (fresh) view.feel(Feel.Reject) }
     AnimatedVisibility(shown, enter = expandVertically(tween(Motion.M2, easing = Motion.Out)) + fadeIn()) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp).background(Tone.Panel, Shapes.Tile).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Glyph.Alert, Signal.Err, size = 18.dp)
-            Spacer(Modifier.width(8.dp))
-            BasicText(text, Modifier.weight(1f), style = Type.Body)
-            if (last) {
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp).background(Tone.Panel, Shapes.Tile).padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Glyph.Alert, Signal.Err, size = 18.dp)
                 Spacer(Modifier.width(8.dp))
-                Btn(tr("Try again", "Spróbuj ponownie"), { m.retry() }, variant = Variant.Quiet, height = 34.dp)
+                BasicText(text, Modifier.weight(1f), style = Type.Body)
+            }
+            if (retry != null) {
+                CapsuleBtn(tr("Try again", "Spróbuj ponownie"), retry, Modifier.padding(top = 10.dp, start = 26.dp)) {
+                    Icon(Glyph.Refresh, Ink.Two, size = 14.dp)
+                }
             }
         }
     }
@@ -970,6 +1393,8 @@ private fun Actions(
     msg: Message,
     last: Boolean,
     toast: Toast,
+    busy: Boolean,
+    retry: () -> Unit,
     selecting: Boolean,
     onSelect: (Boolean) -> Unit,
     info: Boolean,
@@ -979,6 +1404,7 @@ private fun Actions(
     val clip = LocalClipboardManager.current
     var menu by remember { mutableStateOf(false) }
     val words = msg.text.isNotBlank()
+    val switchable = msg.versions > 1 && chat?.id == m.current
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         // The icons line up with the text above them, not their touch targets.
         Row(Modifier.fillMaxWidth().offset(x = (-9).dp), verticalAlignment = Alignment.CenterVertically) {
@@ -986,7 +1412,7 @@ private fun Actions(
                 CopyButton({ msg.text })
                 ActionBtn({ share(ctx, plainText(msg.text)) }) { Drawn(DrawScope::shareMark) }
             }
-            if (last) RetryButton(m)
+            if (last && !busy) RetryButton(retry)
             Box {
                 ActionBtn({ menu = true }) { Icon(Glyph.More, Ink.Three, size = 18.dp) }
                 MoreMenu(
@@ -1008,6 +1434,7 @@ private fun Actions(
                 )
             }
             Spacer(Modifier.weight(1f))
+            if (switchable && !selecting) Versions(m, msg, busy)
             AnimatedVisibility(selecting, enter = fadeIn(tween(Motion.M2)) + scaleIn(spring(0.7f, 600f), 0.8f), exit = fadeOut(tween(Motion.M1))) {
                 Btn(tr("Done", "Gotowe"), { onSelect(false) }, Modifier.offset(x = 9.dp), Variant.Quiet, height = 32.dp)
             }
@@ -1022,10 +1449,22 @@ private fun Actions(
     }
 }
 
+/** ‹ 2/3 ›: the answers this question has had, one on screen. */
 @Composable
-private fun ActionBtn(onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun Versions(m: AppModel, msg: Message, busy: Boolean) {
+    val at = msg.shown
+    val of = msg.versions
+    Row(Modifier.offset(x = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        ActionBtn({ m.showVersion(msg.id, at - 1) }, enabled = at > 0 && !busy) { Icon(Glyph.Left, Ink.Three, size = 16.dp) }
+        Roll("${at + 1}/$of", Type.Meta.copy(color = Ink.Two, fontFeatureSettings = "tnum"), digits = true)
+        ActionBtn({ m.showVersion(msg.id, at + 1) }, enabled = at < of - 1 && !busy) { Icon(Glyph.Right, Ink.Three, size = 16.dp) }
+    }
+}
+
+@Composable
+private fun ActionBtn(onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
     Box(
-        Modifier.size(36.dp).pressable(onClick, CircleShape, Color.Transparent, Tone.Raise, depth = 0.88f, stretch = true),
+        Modifier.size(36.dp).pressable(onClick, CircleShape, Color.Transparent, Tone.Raise, depth = 0.88f, enabled = enabled, stretch = true),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
@@ -1035,20 +1474,26 @@ private fun share(ctx: Context, text: String) {
     runCatching { ctx.startActivity(Intent.createChooser(send, null)) }
 }
 
-/** The answer's receipt in words: which model, how fast, how much, how long. */
+/** The answer's receipt in words: which model, how fast, how much of the window, how long. */
 @Composable
 private fun AnswerInfo(chat: Chat?, msg: Message) {
     val r = msg.receipt
-    val model = msg.raw.optJSONObject("meta")?.optString("model")?.ifBlank { null }
+    val meta = msg.meta
+    val model = meta?.optString("model")?.ifBlank { null }
         ?: chat?.raw?.optString("modelName")?.takeIf { it.isNotBlank() && it != "null" }
+    val quant = meta?.optString("quant")?.ifBlank { null }
     val speed = r?.optDouble("decode_tok_s")?.takeIf { !it.isNaN() && it > 0 }
     val written = r?.optLong("generated_tokens") ?: 0L
-    val read = r?.optLong("prompt_tokens") ?: 0L
+    val read = r?.optLong("working_tokens")?.takeIf { it > 0 } ?: r?.optLong("prompt_tokens") ?: 0L
+    val window = meta?.optInt("window") ?: 0
+    val memory = r?.optLong("selected_tokens") ?: 0L
     val ms = r?.optLong("total_ms") ?: 0L
     val rows = listOfNotNull(
-        model?.let { tr("Model", "Model") to it },
+        model?.let { tr("Model", "Model") to (if (quant != null) "$it · $quant" else it) },
         speed?.let { tr("Speed", "Szybkość") to "%.1f tokens/s".format(it) },
-        written.takeIf { it > 0 }?.let { tr("Tokens", "Tokeny") to "%,d written".format(it) + if (read > 0) ", %,d read".format(read) else "" },
+        written.takeIf { it > 0 }?.let { tr("Written", "Napisane") to tokens(it) },
+        read.takeIf { it > 0 }?.let { tr("Window", "Okno") to if (window > 0) tokens(read) + " / " + tokens(window.toLong()) else tokens(read) },
+        memory.takeIf { it > 0 }?.let { tr("Memory", "Pamięć") to tokens(it) },
         ms.takeIf { it > 0 }?.let { tr("Time", "Czas") to if (it < 10_000) "%.1f s".format(it / 1000.0) else "${(it + 500) / 1000} s" },
     )
     Column(
@@ -1058,7 +1503,7 @@ private fun AnswerInfo(chat: Chat?, msg: Message) {
         if (rows.isEmpty()) BasicText(tr("No details were kept for this answer.", "Brak szczegółów tej odpowiedzi."), style = Type.Meta)
         rows.forEach { (k, v) ->
             Row {
-                BasicText(k, Modifier.width(72.dp), style = Type.Meta)
+                BasicText(k, Modifier.width(76.dp), style = Type.Meta)
                 BasicText(v, style = Type.Meta.copy(color = Ink.One, fontFeatureSettings = "tnum"), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -1067,27 +1512,28 @@ private fun AnswerInfo(chat: Chat?, msg: Message) {
 
 private class MenuRow(val label: String, val icon: @Composable () -> Unit, val go: () -> Unit)
 
-/** Opens above its button when there is room, below it when not. */
-private class MenuPlacement(private val gap: Int, private val clear: Int, private val up: MutableState<Boolean>) : PopupPositionProvider {
+/** Opens above its anchor when there is room, below it when not; [end] lines it up with the anchor's far edge. */
+private class MenuPlacement(private val gap: Int, private val clear: Int, private val end: Boolean, private val up: MutableState<Boolean>) : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
         val above = anchorBounds.top - popupContentSize.height - gap
         up.value = above >= clear
-        val x = anchorBounds.left.coerceAtMost(windowSize.width - popupContentSize.width - gap * 2).coerceAtLeast(gap * 2)
+        val from = if (end) anchorBounds.right - popupContentSize.width else anchorBounds.left
+        val x = from.coerceAtMost(windowSize.width - popupContentSize.width - gap * 2).coerceAtLeast(gap * 2)
         return IntOffset(x, if (up.value) above else anchorBounds.bottom + gap)
     }
 }
 
-/** A small island that grows out of the three dots, its rows following one after another. */
+/** A small island that grows out of what opened it: one rounded group, its rows arriving one after another. */
 @Composable
-private fun MoreMenu(open: Boolean, onDismiss: () -> Unit, rows: List<MenuRow>) {
+private fun MoreMenu(open: Boolean, onDismiss: () -> Unit, rows: List<MenuRow>, end: Boolean = false) {
     val calm = LocalShell.current.calm
     val state = remember { MutableTransitionState(false) }
     state.targetState = open
     if (!state.currentState && !state.targetState && state.isIdle) return
     val d = LocalDensity.current
     val up = remember { mutableStateOf(true) }
-    val place = remember(d) { MenuPlacement(with(d) { 6.dp.roundToPx() }, with(d) { 120.dp.roundToPx() }, up) }
-    val origin = TransformOrigin(0.12f, if (up.value) 1f else 0f)
+    val place = remember(d, end) { MenuPlacement(with(d) { 6.dp.roundToPx() }, with(d) { 120.dp.roundToPx() }, end, up) }
+    val origin = TransformOrigin(if (end) 0.88f else 0.12f, if (up.value) 1f else 0f)
     Popup(popupPositionProvider = place, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         AnimatedVisibility(
             state,
@@ -1095,7 +1541,7 @@ private fun MoreMenu(open: Boolean, onDismiss: () -> Unit, rows: List<MenuRow>) 
             exit = if (calm) fadeOut(tween(Motion.M1)) else fadeOut(tween(Motion.M1)) + scaleOut(tween(Motion.M2, easing = Motion.Leave), 0.5f, origin),
         ) {
             Column(
-                Modifier.widthIn(min = 220.dp, max = 280.dp).background(Tone.Float, Shapes.Card).padding(6.dp),
+                Modifier.widthIn(min = 220.dp, max = 280.dp).clip(Shapes.Card).background(Tone.Raise),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 rows.forEachIndexed { i, row ->
@@ -1105,15 +1551,15 @@ private fun MoreMenu(open: Boolean, onDismiss: () -> Unit, rows: List<MenuRow>) 
                                 enter = if (calm) EnterTransition.None else fadeIn(tween(Motion.M2, delayMillis = 30 + 35 * i)) +
                                     slideInVertically(spring(1f, 420f)) { it / 3 },
                             )
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 50.dp)
                             .pressable(
                                 {
                                     onDismiss()
                                     row.go()
                                 },
-                                Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f,
+                                RectangleShape, Tone.Float, Tone.Hover, depth = 1f,
                             )
-                            .padding(horizontal = 12.dp),
+                            .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         row.icon()
@@ -1130,12 +1576,6 @@ private fun MoreMenu(open: Boolean, onDismiss: () -> Unit, rows: List<MenuRow>) 
 @Composable
 private fun Drawn(mark: DrawScope.(Color) -> Unit, tint: Color = Ink.Three) {
     Box(Modifier.size(18.dp).drawBehind { mark(tint) })
-}
-
-/** A 24-unit grid scaled to the box, stroked like the bold glyphs. */
-private fun DrawScope.strokeMark(c: Color, build: Path.(Float) -> Unit) {
-    val u = size.minDimension / 24f
-    drawPath(Path().apply { build(u) }, c, style = Stroke(2.2f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
 /** Share: an arrow leaving an open tray. */
@@ -1167,8 +1607,67 @@ private fun DrawScope.cursorMark(c: Color) = strokeMark(c) { u ->
     lineTo(14.5f * u, 12f * u)
 }
 
+/** Edit and write: a pencil. */
+private fun DrawScope.penMark(c: Color) = strokeMark(c) { u ->
+    moveTo(4f * u, 20f * u)
+    lineTo(8.5f * u, 19f * u)
+    lineTo(19f * u, 8.5f * u)
+    lineTo(15.5f * u, 5f * u)
+    lineTo(5f * u, 15.5f * u)
+    close()
+    moveTo(13.5f * u, 7f * u)
+    lineTo(17f * u, 10.5f * u)
+}
+
+/** Code: angle brackets around a slash. */
+private fun DrawScope.codeMark(c: Color) = strokeMark(c) { u ->
+    moveTo(8f * u, 7f * u)
+    lineTo(3f * u, 12f * u)
+    lineTo(8f * u, 17f * u)
+    moveTo(16f * u, 7f * u)
+    lineTo(21f * u, 12f * u)
+    lineTo(16f * u, 17f * u)
+    moveTo(14f * u, 5f * u)
+    lineTo(10f * u, 19f * u)
+}
+
+/** Working things out: plus, minus, times, equals. */
+private fun DrawScope.sumMark(c: Color) = strokeMark(c) { u ->
+    moveTo(7f * u, 4.5f * u)
+    lineTo(7f * u, 9.5f * u)
+    moveTo(4.5f * u, 7f * u)
+    lineTo(9.5f * u, 7f * u)
+    moveTo(14.5f * u, 7f * u)
+    lineTo(19.5f * u, 7f * u)
+    moveTo(5f * u, 15f * u)
+    lineTo(9f * u, 19f * u)
+    moveTo(9f * u, 15f * u)
+    lineTo(5f * u, 19f * u)
+    moveTo(14.5f * u, 15.5f * u)
+    lineTo(19.5f * u, 15.5f * u)
+    moveTo(14.5f * u, 18.5f * u)
+    lineTo(19.5f * u, 18.5f * u)
+}
+
+/** Dictation: a microphone. */
+private fun DrawScope.micMark(c: Color) = strokeMark(c) { u ->
+    moveTo(12f * u, 3f * u)
+    cubicTo(10.3f * u, 3f * u, 9f * u, 4.3f * u, 9f * u, 6f * u)
+    lineTo(9f * u, 11f * u)
+    cubicTo(9f * u, 12.7f * u, 10.3f * u, 14f * u, 12f * u, 14f * u)
+    cubicTo(13.7f * u, 14f * u, 15f * u, 12.7f * u, 15f * u, 11f * u)
+    lineTo(15f * u, 6f * u)
+    cubicTo(15f * u, 4.3f * u, 13.7f * u, 3f * u, 12f * u, 3f * u)
+    close()
+    moveTo(5.5f * u, 11f * u)
+    cubicTo(5.5f * u, 14.6f * u, 8.4f * u, 17.5f * u, 12f * u, 17.5f * u)
+    cubicTo(15.6f * u, 17.5f * u, 18.5f * u, 14.6f * u, 18.5f * u, 11f * u)
+    moveTo(12f * u, 17.5f * u)
+    lineTo(12f * u, 21f * u)
+}
+
 @Composable
-private fun RetryButton(m: AppModel) {
+private fun RetryButton(retry: () -> Unit) {
     val calm = LocalShell.current.calm
     val scope = rememberCoroutineScope()
     val spin = remember { Animatable(0f) }
@@ -1178,59 +1677,173 @@ private fun RetryButton(m: AppModel) {
                 spin.snapTo(0f)
                 spin.animateTo(-360f, spring(0.8f, 300f, visibilityThreshold = 1f))
             }
-            m.retry()
+            retry()
         }
     }) {
         Icon(Glyph.Refresh, Ink.Three, Modifier.graphicsLayer { rotationZ = spin.value }, size = 18.dp)
     }
 }
 
+/** A paste this long goes with the question as a file, not as a wall of text in the field (the panel's rule). */
+private fun isLongPaste(text: String) = text.length >= 2500 || text.count { it == '\n' } >= 39
+
+private fun pasted(text: String) = Attachment(tr("Pasted text", "Wklejony tekst") + ".txt", text.toByteArray().size.toLong(), text = text, kind = "TXT")
+
+/** Takes a long paste back out of the field and hands it over as an attachment. */
+private class LongPaste(private val onPaste: (String) -> Unit) : InputTransformation {
+    override fun TextFieldBuffer.transformInput() {
+        val before = originalText
+        val now = asCharSequence()
+        if (now.length - before.length < 40) return
+        var p = 0
+        while (p < before.length && p < now.length && before[p] == now[p]) p++
+        var s = 0
+        while (s < before.length - p && s < now.length - p && before[before.length - 1 - s] == now[now.length - 1 - s]) s++
+        val added = now.subSequence(p, now.length - s).toString()
+        if (!isLongPaste(added)) return
+        revertAllChanges()
+        onPaste(added)
+    }
+}
+
+/** A thin light running around the composer's edge while the model works. */
+private fun Modifier.workLight(glow: () -> Float, turn: () -> Float, shape: Shape, color: Color) = drawWithCache {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val stroke = Stroke(1.5.dp.toPx())
+    onDrawWithContent {
+        drawContent()
+        val g = glow()
+        if (g <= 0.01f) return@onDrawWithContent
+        val p = turn() % 1f
+        val stops = Array(17) { k ->
+            val t = k / 16f
+            var dist = abs(t - p)
+            if (dist > 0.5f) dist = 1f - dist
+            val a = (1f - dist / 0.24f).coerceIn(0f, 1f)
+            t to color.copy(alpha = g * (0.1f + 0.9f * a * a))
+        }
+        drawOutline(outline, Brush.sweepGradient(*stops, center = center), style = stroke)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit) {
+private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: MutableIntState, onHeight: (Int) -> Unit) {
     val shell = LocalShell.current
     val calm = shell.calm
-    var draft by rememberSaveable(m.current) { mutableStateOf("") }
-    val attached = remember(m.current) { mutableStateListOf<Attachment>() }
-    var adding by remember(m.current) { mutableStateOf(false) }
-    var lines by remember { mutableIntStateOf(1) }
+    val accent = LocalAccent.current
     val app = LocalContext.current
+    val view = LocalView.current
     val scope = rememberCoroutineScope()
-    val take: (List<Uri>) -> Unit = { uris ->
+    val field = draft.field
+    val attached = draft.attached
+    var adding by remember(draft) { mutableStateOf(false) }
+    var lines by remember { mutableIntStateOf(1) }
+    val vision = m.status?.model?.vision == true
+    val take = rememberUpdatedState<(List<Uri>) -> Unit> { uris ->
         scope.launch {
             for (u in uris) {
-                Attachment.read(app, u) { name -> toast.show(tr("$name is not a picture or a text file", "$name to nie zdjęcie ani plik tekstowy")) }
+                Attachment.read(app, u, vision) { toast.show(it) }
                     ?.let { a -> if (attached.none { it.name == a.name && it.bytes == a.bytes }) attached += a }
             }
         }
     }
-    val pickers = rememberPickers(take)
-    val empty by remember { derivedStateOf { (m.chat?.raw?.optJSONArray("messages")?.length() ?: 0) == 0 } }
+    val pickers = rememberPickers { take.value(it) }
+    val here = rememberUpdatedState(draft)
+    val dictation = rememberDictation { said ->
+        val t = said.trim()
+        if (t.isNotEmpty()) {
+            val f = here.value.field
+            val was = f.text.toString()
+            f.setTextAndPlaceCursorAtEnd(if (was.isBlank()) t else was.trimEnd() + " " + t)
+        }
+    }
+    val longPaste = remember(draft) { LongPaste { t -> scope.launch { attached += pasted(t) } } }
+    val receiver = remember(draft) {
+        object : ReceiveContentListener {
+            override fun onReceive(transferableContent: TransferableContent): TransferableContent? {
+                if (!transferableContent.hasMediaType(MediaType.Image)) return transferableContent
+                val uris = mutableListOf<Uri>()
+                val rest = transferableContent.consume { item -> item.uri?.also { uris += it } != null }
+                if (uris.isNotEmpty()) take.value(uris)
+                return rest
+            }
+        }
+    }
+
+    LaunchedEffect(m.incoming) {
+        val got = m.takeIncoming() ?: return@LaunchedEffect
+        val words = got.text.trim()
+        when {
+            isLongPaste(words) -> attached += pasted(words)
+            words.isNotEmpty() -> field.setTextAndPlaceCursorAtEnd((field.text.toString().trimEnd() + " " + words).trim())
+        }
+        got.files.forEach { a -> if (attached.none { it.name == a.name && it.bytes == a.bytes }) attached += a }
+    }
+    LaunchedEffect(m.shortcut) {
+        when (m.takeShortcut()) {
+            "voice" -> VoiceState.open()
+            "camera" -> pickers.camera()
+        }
+    }
+    LaunchedEffect(dictation.problem) { dictation.problem?.let { toast.show(it) } }
+    LaunchedEffect(draft) {
+        snapshotFlow { field.text.toString() }.collectLatest { t ->
+            delay(600)
+            if (draft.editing == null) m.keepDraft(draft.chatId, t)
+        }
+    }
+    DisposableEffect(draft) {
+        onDispose {
+            val kept = draft.chatId == null || m.chats.any { it.id == draft.chatId }
+            if (draft.editing == null && kept) m.keepDraft(draft.chatId, field.text.toString())
+        }
+    }
+
+    val typed by remember(draft) { derivedStateOf { field.text.isNotBlank() } }
+    val empty by remember(draft) { derivedStateOf { field.text.isEmpty() } }
+    val fresh by remember { derivedStateOf { (m.chat?.raw?.optJSONArray("messages")?.length() ?: 0) == 0 } }
+    val meter by remember { derivedStateOf { m.meter(m.current) } }
+    val editing = draft.editing
     val loaded = m.status?.model != null
     val offline = m.online == false
     val loading = m.loading != null
     val streaming = m.streaming
-    val pictures = attached.any { it.image != null }
-    val blind = pictures && m.status?.model?.vision == false
+    val blind = attached.any { it.pictures.isNotEmpty() } && m.status?.model?.vision == false
     val placeholder = when {
         offline -> tr("Your computer is offline", "Komputer jest niedostępny")
         loading -> tr("Loading the model…", "Wczytuję model…")
+        editing != null -> tr("Edit your message", "Popraw wiadomość")
         loaded -> tr("Ask anything", "Zapytaj o cokolwiek")
         else -> tr("Choose a model to get answers", "Wybierz model, by dostać odpowiedź")
     }
+    val something = typed || attached.isNotEmpty() || editing?.files?.isNotEmpty() == true
     val blocked = when {
-        streaming || (draft.isBlank() && attached.isEmpty()) -> null
+        streaming || !something -> null
         blind -> tr("This model cannot see pictures", "Ten model nie widzi zdjęć")
         offline -> tr("Your computer is offline", "Komputer jest niedostępny")
         loading -> tr("Loading the model…", "Wczytuję model…")
         else -> null
     }
-    val ready = (draft.isNotBlank() || attached.isNotEmpty()) && loaded && !offline && !streaming && !blind
+    val ready = something && loaded && !offline && !streaming && !blind
     val send: () -> Unit = {
-        m.send(draft, attached.toList())
-        draft = ""
+        val words = field.text.toString()
+        val e = draft.editing
+        if (e != null) {
+            m.edit(e.id, words)
+            draft.editing = null
+        } else {
+            m.send(words, attached.toList())
+        }
+        field.clearText()
         attached.clear()
+        if (dictation.listening) dictation.stop()
+        landed.intValue++
     }
-    val view = LocalView.current
+    val cancelEdit: () -> Unit = {
+        draft.editing = null
+        field.setTextAndPlaceCursorAtEnd(draft.aside)
+    }
     val enter: () -> Unit = {
         when {
             ready -> {
@@ -1244,9 +1857,19 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
             }
         }
     }
-    val tall = lines > 1 || attached.isNotEmpty()
-    val corner by animateDpAsState(if (tall) 24.dp else 28.dp, spring(0.85f, 420f), label = "corner")
+    val tall = lines > 1 || attached.isNotEmpty() || editing != null
+    val corner by animateDpAsState(if (tall) 26.dp else 28.dp, spring(1f, 420f), label = "corner")
     val pill = RoundedCornerShape(corner)
+    val glow = animateFloatAsState(if (streaming) 1f else 0f, tween(if (streaming) 500 else 800), label = "glow")
+    val turn = remember { Animatable(0f) }
+    LaunchedEffect(streaming, calm) {
+        if (streaming && !calm) {
+            while (true) {
+                turn.snapTo(turn.value % 1f)
+                turn.animateTo(turn.value + 1f, tween(2600, easing = LinearEasing))
+            }
+        }
+    }
 
     if (adding) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { adding = false } })
 
@@ -1261,23 +1884,61 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
             onPhotos = { adding = false; pickers.photos() },
             onFiles = { adding = false; pickers.files() },
         )
-        Column(Modifier.fillMaxWidth().animateContentSize(spring(0.9f, 500f)).glass(shell.cardHaze, pill).padding(6.dp)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .animateContentSize(spring(1f, 500f))
+                .glass(shell.cardHaze, pill)
+                .workLight({ glow.value }, { turn.value }, pill, accent)
+                .padding(6.dp),
+        ) {
+            AnimatedVisibility(
+                editing != null,
+                enter = fadeIn(tween(Motion.M2)) + expandVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+                exit = fadeOut(tween(Motion.M1)) + shrinkVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Drawn(DrawScope::penMark, accent)
+                    Spacer(Modifier.width(8.dp))
+                    BasicText(tr("Editing your message", "Edytujesz wiadomość"), Modifier.weight(1f), style = Type.Meta.copy(color = Ink.Two, fontWeight = FontWeight.Medium))
+                    IconBtn(Glyph.Close, cancelEdit, tint = Ink.Three, fill = Color.Transparent, size = 32.dp)
+                }
+            }
             AnimatedVisibility(
                 attached.isNotEmpty(),
-                enter = fadeIn(tween(Motion.M2)) + expandVertically(tween(Motion.M3, easing = Motion.Out)),
-                exit = fadeOut(tween(Motion.M1)) + shrinkVertically(tween(Motion.M2, easing = Motion.Standard)),
+                enter = fadeIn(tween(Motion.M2)) + expandVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+                exit = fadeOut(tween(Motion.M1)) + shrinkVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
             ) { AttachRow(attached) { attached.remove(it) } }
-            Row(verticalAlignment = Alignment.Bottom) {
-                val turn by animateFloatAsState(if (adding) 45f else 0f, spring(0.6f, 520f), label = "plus")
-                IconBtn(
-                    Glyph.Plus, { adding = !adding },
-                    Modifier.graphicsLayer { rotationZ = turn },
-                    tint = if (adding) Ink.One else Ink.Two, fill = if (adding) Tone.Raise else Color.Transparent, size = 44.dp,
+            AnimatedVisibility(
+                dictation.listening,
+                enter = fadeIn(tween(Motion.M2)) + expandVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+                exit = fadeOut(tween(Motion.M1)) + shrinkVertically(spring(1f, 500f, IntSize.VisibilityThreshold)),
+            ) {
+                BasicText(
+                    dictation.partial.ifBlank { tr("Listening…", "Słucham…") },
+                    Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 6.dp),
+                    style = Type.Meta.copy(color = Ink.Three),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                AnimatedVisibility(
+                    editing == null,
+                    enter = fadeIn(tween(Motion.M2)) + expandHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
+                    exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
+                ) {
+                    val spin by animateFloatAsState(if (adding) 45f else 0f, spring(0.6f, 520f), label = "plus")
+                    IconBtn(
+                        Glyph.Plus, { adding = !adding },
+                        Modifier.graphicsLayer { rotationZ = spin },
+                        tint = if (adding) Ink.One else Ink.Two, fill = if (adding) Tone.Raise else Color.Transparent, size = 44.dp,
+                    )
+                }
                 BasicTextField(
-                    draft,
-                    { draft = it },
-                    Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 6.dp, vertical = 11.dp)
+                    state = field,
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 11.dp)
+                        .focusRequester(draft.focus)
+                        .contentReceiver(receiver)
                         .onPreviewKeyEvent { e ->
                             // A hardware Enter sends when Enter sends; Shift+Enter still breaks the line.
                             if (m.enterSends && e.key == Key.Enter && !e.isShiftPressed) {
@@ -1287,19 +1948,35 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
                                 false
                             }
                         },
+                    inputTransformation = longPaste,
                     textStyle = Type.Body,
                     keyboardOptions = if (m.enterSends) KeyboardOptions(imeAction = ImeAction.Send) else KeyboardOptions.Default,
-                    keyboardActions = KeyboardActions(onSend = { enter() }),
-                    cursorBrush = SolidColor(LocalAccent.current),
-                    maxLines = 8,
-                    onTextLayout = { lines = it.lineCount },
-                    decorationBox = { inner ->
-                        Box {
-                            if (draft.isEmpty()) Roll(placeholder, Type.Body.copy(color = Ink.Four))
-                            inner()
+                    onKeyboardAction = if (m.enterSends) {
+                        object : KeyboardActionHandler {
+                            override fun onKeyboardAction(performDefaultAction: () -> Unit) = enter()
+                        }
+                    } else {
+                        null
+                    },
+                    lineLimits = TextFieldLineLimits.MultiLine(1, 8),
+                    onTextLayout = { result -> lines = result()?.lineCount ?: 1 },
+                    cursorBrush = SolidColor(accent),
+                    decorator = object : TextFieldDecorator {
+                        @Composable
+                        override fun Decoration(innerTextField: @Composable () -> Unit) {
+                            Box {
+                                if (empty) Roll(placeholder, Type.Body.copy(color = Ink.Four))
+                                innerTextField()
+                            }
                         }
                     },
                 )
+                MicButton({ dictation.listening }, { dictation.level }, onVoice = {
+                    dictation.cancel()
+                    VoiceState.open()
+                }) {
+                    if (dictation.listening) dictation.stop() else dictation.start()
+                }
                 AnimatedContent(
                     !loaded && !loading && !offline && !streaming,
                     transitionSpec = {
@@ -1322,20 +1999,22 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
                             )
                         }
                     } else {
-                        SendButton(
-                            streaming = streaming,
-                            ready = ready,
-                            blocked = blocked,
-                            onSend = send,
-                            onStop = { m.stop() },
-                            onBlocked = { toast.show(it) },
-                        )
+                        MeterRing({ meter?.let { if (it.window > 0) it.used.toFloat() / it.window else null } }) {
+                            SendButton(
+                                streaming = streaming,
+                                ready = ready,
+                                blocked = blocked,
+                                onSend = send,
+                                onStop = { m.stop() },
+                                onBlocked = { toast.show(it) },
+                            )
+                        }
                     }
                 }
             }
         }
         AnimatedVisibility(
-            empty,
+            fresh && empty,
             enter = fadeIn(tween(Motion.M2)) + expandVertically(tween(Motion.M2, easing = Motion.Out)),
             exit = fadeOut(tween(Motion.M1)) + shrinkVertically(tween(Motion.M2, easing = Motion.Standard)),
         ) {
@@ -1346,6 +2025,56 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, onHeight: (Int) -> Unit
             )
         }
     }
+}
+
+/** Dictation beside send: the circle fills while it listens and breathes with the voice. */
+@Composable
+private fun MicButton(listening: () -> Boolean, level: () -> Float, onVoice: () -> Unit, onToggle: () -> Unit) {
+    val accent = LocalAccent.current
+    val on = listening()
+    val fill by animateColorAsState(if (on) accent.copy(alpha = 0.2f) else Color.Transparent, tween(Motion.M2), label = "mic")
+    Box(
+        Modifier.size(44.dp)
+            .voiceSource()
+            .drawBehind {
+                if (on) drawCircle(accent.copy(alpha = 0.16f), radius = size.minDimension / 2f * (0.78f + 0.3f * level().coerceIn(0f, 1f)))
+            }
+            .pressable(onToggle, CircleShape, fill, Tone.Raise, depth = 0.88f, stretch = true, feel = if (on) Feel.Off else Feel.On, onLong = onVoice),
+        contentAlignment = Alignment.Center,
+    ) {
+        Drawn(DrawScope::micMark, if (on) accent else Ink.Two)
+    }
+}
+
+/** How full the chat's window is, as a slim ring around send; it warms as the window fills. */
+@Composable
+private fun MeterRing(used: () -> Float?, content: @Composable () -> Unit) {
+    val share = used()
+    val ring = animateFloatAsState((share ?: 0f).coerceIn(0f, 1f), spring(1f, 120f), label = "meter")
+    val shown = animateFloatAsState(if (share != null) 1f else 0f, tween(Motion.M3), label = "meterShown")
+    Box(
+        Modifier.size(44.dp).drawBehind {
+            val a = shown.value
+            if (a <= 0.01f) return@drawBehind
+            val p = ring.value
+            val stroke = 1.6.dp.toPx()
+            val r = size.minDimension / 2f - stroke / 2f
+            val tint = when {
+                p >= 0.95f -> Signal.Err
+                p >= 0.8f -> Signal.Warn
+                else -> Ink.Three
+            }
+            drawCircle(Ink.Four.copy(alpha = 0.22f * a), r, style = Stroke(stroke))
+            if (p > 0f) {
+                drawArc(
+                    tint.copy(alpha = a), -90f, 360f * p, false,
+                    Offset(center.x - r, center.y - r), Size(r * 2f, r * 2f),
+                    style = Stroke(stroke, cap = StrokeCap.Round),
+                )
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 /** Send and stop are one drawn glyph: the arrow folds into a bar that fills out into the stop square. */
@@ -1402,7 +2131,7 @@ private fun SendButton(
     }
 
     Box(
-        Modifier.size(40.dp)
+        Modifier.size(38.dp)
             .graphicsLayer {
                 val w = wake.value
                 translationY = (1f - w) * 2.dp.toPx()
@@ -1432,7 +2161,7 @@ private fun SendButton(
                 blocked = blocked?.let { reason -> { shell.nudgeModel(); onBlocked(reason) } },
             )
             .drawWithCache {
-                val u = 1.dp.toPx()
+                val u = size.minDimension / 40f
                 onDrawBehind {
                     drawCircle(fill.value)
                     glyph(p.value.coerceIn(0f, 1f), ink.value, u, 0f, 1f)
@@ -1445,7 +2174,7 @@ private fun SendButton(
 
 private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
-/** In a 40dp box: 0 is the send arrow, 1 the stop square. */
+/** In a 40-unit box: 0 is the send arrow, 1 the stop square. */
 private fun DrawScope.glyph(p: Float, color: Color, u: Float, dy: Float, alpha: Float) {
     val w = 2.2f * u
     val cx = 20f * u
@@ -1477,22 +2206,24 @@ private fun DrawScope.glyph(p: Float, color: Color, u: Float, dy: Float, alpha: 
 @Composable
 private fun BoxScope.ToastIsland(toast: Toast, lift: Density.() -> Int) {
     val calm = LocalShell.current.calm
+    val view = LocalView.current
     val last = remember { arrayOf("") }
     toast.text?.let { last[0] = it }
     LaunchedEffect(toast.shown) {
-        if (toast.text != null) {
-            delay(1400)
-            toast.hide()
-        }
+        val t = toast.text ?: return@LaunchedEffect
+        view.announce(t)
+        // A whole sentence (why a file was refused) stays long enough to be read.
+        delay((1400L + 35L * t.length).coerceAtMost(5000L))
+        toast.hide()
     }
     AnimatedVisibility(
         toast.text != null,
-        Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -lift()) },
+        Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -lift()) }.padding(horizontal = 24.dp),
         enter = if (calm) fadeIn(tween(Motion.M2)) else fadeIn(tween(Motion.M2)) + slideInVertically(spring(0.9f, 500f)) { it / 2 },
         exit = fadeOut(tween(Motion.M2)),
     ) {
-        Box(Modifier.height(36.dp).background(Tone.Float, Shapes.Card).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-            BasicText(last[0], style = Type.Meta.copy(color = Ink.One))
+        Box(Modifier.heightIn(min = 36.dp).background(Tone.Float, Shapes.Card).padding(horizontal = 14.dp, vertical = 9.dp), contentAlignment = Alignment.Center) {
+            BasicText(last[0], style = Type.Meta.copy(color = Ink.One, textAlign = TextAlign.Center))
         }
     }
 }

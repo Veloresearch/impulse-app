@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -31,11 +33,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -44,8 +56,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
@@ -71,6 +86,7 @@ fun Btn(
     enabled: Boolean = true,
     height: Dp = 48.dp,
     blocked: (() -> Unit)? = null,
+    description: String? = null,
 ) {
     val accent = LocalAccent.current
     val (rest, down, ink) = when (variant) {
@@ -82,6 +98,7 @@ fun Btn(
     Row(
         modifier
             .height(height)
+            .semantics { contentDescription = description ?: text }
             .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled, stretch = true, blocked = blocked)
             .padding(horizontal = Space.S4),
         horizontalArrangement = Arrangement.Center,
@@ -95,6 +112,10 @@ fun Btn(
     }
 }
 
+/**
+ * A round button. Below 48dp the drawn circle keeps [size] while the touch area and what TalkBack
+ * focuses grow to 48dp around it, without taking more room in the layout.
+ */
 @Composable
 fun IconBtn(
     icon: Glyph,
@@ -106,20 +127,83 @@ fun IconBtn(
     enabled: Boolean = true,
     island: Boolean = false,
     liquid: Float = 1f,
+    description: String = icon.spoken(),
 ) {
     Box(
-        modifier.size(size).pressable(
-            onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press,
-            depth = 0.88f, enabled = enabled, stretch = true, liquid = liquid, feelOnDown = island,
-        ),
+        modifier.size(size).requiredSize(maxOf(size, Reach))
+            .semantics { contentDescription = description }
+            .pressable(
+                onClick, Dot(size), fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press,
+                depth = 0.88f, enabled = enabled, stretch = true, liquid = liquid, feelOnDown = island,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, tint, size = size * 0.48f)
     }
 }
 
+private val Reach = 48.dp
+
+/** A circle [diameter] across, centred in whatever box it is given. */
+private class Dot(private val diameter: Dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val r = minOf(with(density) { diameter.toPx() }, size.minDimension) / 2f
+        val c = size.center
+        return Outline.Rounded(RoundRect(c.x - r, c.y - r, c.x + r, c.y + r, CornerRadius(r)))
+    }
+
+    override fun equals(other: Any?) = other is Dot && other.diameter == diameter
+    override fun hashCode() = diameter.hashCode()
+}
+
+/** What TalkBack says for a round button that shows only [this] glyph. */
+fun Glyph.spoken(): String = when (this) {
+    Glyph.Home -> tr("Home", "Start")
+    Glyph.Chat -> tr("Chat", "Czat")
+    Glyph.Models -> tr("Models", "Modele")
+    Glyph.Contexts -> tr("Memory", "Pamięć")
+    Glyph.More -> tr("More", "Więcej")
+    Glyph.Sidebar -> tr("Chats", "Czaty")
+    Glyph.Settings -> tr("Settings", "Ustawienia")
+    Glyph.Search -> tr("Search", "Szukaj")
+    Glyph.Plus -> tr("Add", "Dodaj")
+    Glyph.Send -> tr("Send", "Wyślij")
+    Glyph.Stop -> tr("Stop", "Zatrzymaj")
+    Glyph.Close -> tr("Close", "Zamknij")
+    Glyph.Check -> tr("Done", "Gotowe")
+    Glyph.Down -> tr("Scroll to the end", "Przewiń na koniec")
+    Glyph.Left -> tr("Back", "Wstecz")
+    Glyph.Right -> tr("Open", "Otwórz")
+    Glyph.Copy -> tr("Copy", "Kopiuj")
+    Glyph.Refresh -> tr("Try again", "Spróbuj ponownie")
+    Glyph.Trash -> tr("Delete", "Usuń")
+    Glyph.Activity -> tr("Activity", "Aktywność")
+    Glyph.Pin -> tr("Pin", "Przypnij")
+    Glyph.Brain -> tr("Thinking", "Myślenie")
+    Glyph.Globe -> tr("Web search", "Wyszukiwanie w sieci")
+    Glyph.Phone -> tr("Phone", "Telefon")
+    Glyph.Lock -> tr("Locked", "Zablokowane")
+    Glyph.Info -> tr("Details", "Szczegóły")
+    Glyph.Alert -> tr("Warning", "Ostrzeżenie")
+    Glyph.Link -> tr("Link", "Link")
+    Glyph.Sparkle -> tr("Suggestions", "Podpowiedzi")
+    Glyph.QrCode -> tr("Scan a code", "Zeskanuj kod")
+    Glyph.SignOut -> tr("Sign out", "Wyloguj")
+    Glyph.Palette -> tr("Appearance", "Wygląd")
+    Glyph.Wifi -> tr("Network", "Sieć")
+    Glyph.Cloud -> tr("Tunnel", "Tunel")
+    Glyph.Shield -> tr("Private network", "Sieć prywatna")
+    Glyph.Eye -> tr("Show", "Pokaż")
+    Glyph.EyeOff -> tr("Hide", "Ukryj")
+    Glyph.Camera -> tr("Camera", "Aparat")
+    Glyph.File -> tr("Attach a file", "Dołącz plik")
+    Glyph.Image -> tr("Attach a picture", "Dołącz obraz")
+    Glyph.History -> tr("History", "Historia")
+    Glyph.Users -> tr("Profiles", "Profile")
+}
+
 @Composable
-fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, description: String? = null) {
     val accent = LocalAccent.current
     val calm = LocalReduceMotion.current
     val track = animateColorAsState(if (checked) accent else Tone.Press, tween(Motion.M2), label = "track")
@@ -128,6 +212,10 @@ fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = M
     Box(
         modifier
             .size(51.dp, 31.dp)
+            .semantics {
+                toggleableState = ToggleableState(checked)
+                if (description != null) contentDescription = description
+            }
             .then(if (calm) Modifier else Modifier.liquidTouch(blob))
             .pressable({ onChange(!checked) }, depth = 1f, feel = if (checked) Feel.Off else Feel.On, role = Role.Switch)
             .drawBehind { drawRoundRect(track.value, cornerRadius = CornerRadius(size.height / 2f)) }
@@ -147,12 +235,14 @@ fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = M
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     LiquidSlots(
         options.size, selected, onSelect, Tone.Hover, Shapes.ControlSm,
-        modifier.fillMaxWidth().height(40.dp).background(Tone.Inset, Shapes.Control).padding(3.dp),
+        modifier.fillMaxWidth().height(40.dp).background(Tone.Inset, Shapes.Control).padding(3.dp).selectableGroup(),
     ) {
         options.forEachIndexed { i, label ->
             val ink by animateColorAsState(if (i == selected) Ink.One else Ink.Three, label = "seg")
             Box(
-                Modifier.weight(1f).fillMaxHeight().pressable({ onSelect(i) }, depth = 0.96f),
+                Modifier.weight(1f).fillMaxHeight()
+                    .semantics { this.selected = i == selected }
+                    .pressable({ onSelect(i) }, depth = 0.96f, role = Role.Tab),
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
@@ -201,7 +291,9 @@ fun Field(
                 if (secret) {
                     val flip by animateFloatAsState(if (shown) 180f else 0f, Motion.travel(), label = "eye")
                     Box(
-                        Modifier.size(42.dp).pressable({ shown = !shown }, CircleShape, depth = 0.86f, stretch = true)
+                        Modifier.size(42.dp)
+                            .semantics { contentDescription = if (shown) tr("Hide password", "Ukryj hasło") else tr("Show password", "Pokaż hasło") }
+                            .pressable({ shown = !shown }, CircleShape, depth = 0.86f, stretch = true)
                             .graphicsLayer { rotationY = flip; cameraDistance = 12f * density },
                         contentAlignment = Alignment.Center,
                     ) {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_new">New chat</string>
+    <string name="shortcut_voice">Voice</string>
+    <string name="shortcut_voice_long">Talk to Impulse</string>
+    <string name="shortcut_camera">Camera</string>
+    <string name="shortcut_camera_long">Ask about a photo</string>
+</resources>

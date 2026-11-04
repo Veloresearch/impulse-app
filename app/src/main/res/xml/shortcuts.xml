@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new"
+        android:icon="@drawable/shortcut_new"
+        android:shortcutShortLabel="@string/shortcut_new">
+        <intent
+            android:action="com.velocity.impulse.NEW_CHAT"
+            android:targetPackage="com.velocity.impulse"
+            android:targetClass="com.velocity.impulse.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="voice"
+        android:icon="@drawable/shortcut_voice"
+        android:shortcutShortLabel="@string/shortcut_voice"
+        android:shortcutLongLabel="@string/shortcut_voice_long">
+        <intent
+            android:action="com.velocity.impulse.VOICE"
+            android:targetPackage="com.velocity.impulse"
+            android:targetClass="com.velocity.impulse.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="camera"
+        android:icon="@drawable/shortcut_camera"
+        android:shortcutShortLabel="@string/shortcut_camera"
+        android:shortcutLongLabel="@string/shortcut_camera_long">
+        <intent
+            android:action="com.velocity.impulse.CAMERA"
+            android:targetPackage="com.velocity.impulse"
+            android:targetClass="com.velocity.impulse.MainActivity" />
+    </shortcut>
+</shortcuts>
