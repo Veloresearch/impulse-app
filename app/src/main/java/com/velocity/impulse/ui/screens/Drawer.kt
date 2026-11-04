@@ -113,10 +113,13 @@ import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
+import com.velocity.impulse.ui.components.liquidBody
+import com.velocity.impulse.ui.components.rememberLiquid
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -260,7 +263,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
         drop()
     }
     LaunchedEffect(renaming) { if (renaming) nameFocus.requestFocus() }
-    LaunchedEffect(Unit) { snapshotFlow { shell.drawer.targetValue < 1f || shell.pages.targetState != null }.collect { if (it) drop() } }
+    LaunchedEffect(Unit) { snapshotFlow { shell.drawer.targetValue < 1f || shell.page.open }.collect { if (it) drop() } }
     BackHandler(held != null) { drop() }
 
     Box(modifier.fillMaxSize().onPlaced { places.root = it }) {
@@ -280,7 +283,7 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                     )
                     .cascade(shell) { i - list.firstVisibleItemIndex + 1 }
                 when (e) {
-                    Entry.Options -> Options(m, places, item.padding(bottom = 8.dp))
+                    Entry.Options -> Options(m, item.padding(bottom = 8.dp))
                     is Entry.Header -> BasicText(e.label, item.padding(start = 16.dp, top = 20.dp, bottom = 6.dp), style = Type.Label)
                     is Entry.Item -> {
                         val c = e.chat
@@ -459,8 +462,10 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SearchField(query: String, haze: HazeState, onChange: (String) -> Unit) {
+    val drop = rememberLiquid(0.35f)
     Row(
-        Modifier.fillMaxWidth().height(48.dp).glass(haze, Chrome.Capsule).padding(start = 16.dp, end = 6.dp),
+        Modifier.fillMaxWidth().height(48.dp).then(if (LocalShell.current.calm) Modifier else Modifier.liquidBody(drop))
+            .glass(haze, Chrome.Capsule).padding(start = 16.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyph.Search, Ink.Three, size = 18.dp)
@@ -487,7 +492,6 @@ private fun SearchField(query: String, haze: HazeState, onChange: (String) -> Un
 @Composable
 private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
     val shell = LocalShell.current
-    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val me = m.me
     val name = me?.name?.ifBlank { null } ?: "Impulse"
     val dot = when (m.online) {
@@ -495,12 +499,14 @@ private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
         false -> Signal.Err
         null -> Ink.Four
     }
+    val drop = rememberLiquid(0.35f)
     Row(
-        modifier.height(56.dp)
-            .onPlaced { at[0] = it }
+        modifier.grows(shell.page, "drawer-computer", Chrome.Capsule)
+            .height(56.dp)
+            .then(if (shell.calm) Modifier else Modifier.liquidBody(drop))
             .glass(haze, Chrome.Capsule)
             .pressable(
-                { at[0].rect().let { shell.open(Surface.Computer, "drawer-computer", it, it?.height?.div(2) ?: 0f) } },
+                { shell.open(Surface.Computer, "drawer-computer") },
                 Chrome.Capsule, Color.Transparent, Tone.Raise.copy(alpha = 0.6f), depth = 1f, feel = Feel.Tap,
             )
             .padding(start = 8.dp, end = 16.dp),
@@ -527,45 +533,38 @@ private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
 @Composable
 private fun SettingsButton(haze: HazeState) {
     val shell = LocalShell.current
-    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    Box(Modifier.size(56.dp).onPlaced { at[0] = it }.glass(haze, CircleShape), contentAlignment = Alignment.Center) {
-        IconBtn(
-            Glyph.Settings,
-            { at[0].rect().let { shell.open(Surface.Settings, "drawer-settings", it, it?.height?.div(2) ?: 0f) } },
-            tint = Ink.One, fill = Color.Transparent, size = 56.dp, island = true,
-        )
+    Box(Modifier.grows(shell.page, "drawer-settings", CircleShape).size(56.dp), contentAlignment = Alignment.Center) {
+        IconBtn(Glyph.Settings, { shell.open(Surface.Settings, "drawer-settings") }, tint = Ink.One, size = 56.dp, glass = haze)
     }
 }
 
 /** New chat, models and contexts: one group, the pages growing out of their rows. */
 @Composable
-private fun Options(m: AppModel, places: Places, modifier: Modifier) {
+private fun Options(m: AppModel, modifier: Modifier) {
     val shell = LocalShell.current
     val view = LocalView.current
     val accent = LocalAccent.current
     Column(modifier.fillMaxWidth().clip(Chrome.Group), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        OptionLine(Glyph.Plus, accent, accent.copy(alpha = 0.16f), tr("New chat", "Nowy czat"), null, null) {
+        OptionLine(Glyph.Plus, accent, accent.copy(alpha = 0.16f), tr("New chat", "Nowy czat"), null) {
             view.feel(Feel.Tap)
             shell.newChat()
         }
         val model = m.status?.model?.name ?: if (m.loading != null) tr("Loading…", "Wczytywanie…") else tr("None loaded", "Nie wczytano")
-        OptionLine(Glyph.Models, Ink.Two, Tone.Raise, tr("Models", "Modele"), model, places) {
-            shell.open(Surface.Models, "drawer-models", places.rows["opt-models"].rect())
+        OptionLine(Glyph.Models, Ink.Two, Tone.Raise, tr("Models", "Modele"), model, Modifier.grows(shell.page, "drawer-models", RectangleShape)) {
+            shell.open(Surface.Models, "drawer-models")
         }
-        OptionLine(Glyph.Contexts, Ink.Two, Tone.Raise, tr("Contexts", "Konteksty"), m.defaultContext ?: tr("None", "Brak"), places) {
-            shell.open(Surface.Contexts, "drawer-contexts", places.rows["opt-contexts"].rect())
+        OptionLine(Glyph.Contexts, Ink.Two, Tone.Raise, tr("Contexts", "Konteksty"), m.defaultContext ?: tr("None", "Brak"), Modifier.grows(shell.page, "drawer-contexts", RectangleShape)) {
+            shell.open(Surface.Contexts, "drawer-contexts")
         }
     }
 }
 
 @Composable
-private fun OptionLine(glyph: Glyph, ink: Color, tile: Color, title: String, detail: String?, places: Places?, onClick: () -> Unit) {
+private fun OptionLine(glyph: Glyph, ink: Color, tile: Color, title: String, detail: String?, lead: Modifier = Modifier, onClick: () -> Unit) {
     val shell = LocalShell.current
-    val key = "opt-" + glyph.name.lowercase()
     Row(
-        Modifier.fillMaxWidth()
+        lead.fillMaxWidth()
             .height(52.dp)
-            .then(if (places != null) Modifier.onPlaced { places.rows[key] = it } else Modifier)
             .pressable(onClick, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tap)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

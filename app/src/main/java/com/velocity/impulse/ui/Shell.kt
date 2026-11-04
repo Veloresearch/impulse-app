@@ -1,11 +1,6 @@
 package com.velocity.impulse.ui
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.ExperimentalTransitionApi
-import androidx.compose.animation.core.SeekableTransitionState
-import androidx.compose.animation.core.Transition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,6 +23,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.ui.components.Flight
+import com.velocity.impulse.ui.components.Presentation
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.Motion
@@ -84,10 +80,8 @@ fun Pill(
 
 /**
  * The shell's moving parts: how far the drawer is open, which page and sheet stand in front of
- * the conversation and where each grew from, and the scene counter that choreographs chat
- * switches.
+ * the conversation, and the scene counter that choreographs chat switches.
  */
-@OptIn(ExperimentalTransitionApi::class)
 @Stable
 class Shell(val m: AppModel, private val scope: CoroutineScope) {
     /** 1 the chats on the left are open, -1 the details on the right, 0 neither; drags rubber-band past. */
@@ -101,22 +95,8 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
     var calm by mutableStateOf(false)
         internal set
 
-    val pages = SeekableTransitionState<Surface?>(null)
-    val sheets = SeekableTransitionState<Surface?>(null)
-    lateinit var pageTransition: Transition<Surface?>
-        internal set
-    lateinit var sheetTransition: Transition<Surface?>
-        internal set
-    var pageOrigin by mutableStateOf("")
-        private set
-    var sheetOrigin by mutableStateOf("")
-        private set
-
-    /** Where the opening element sat, in root pixels, and its corner; null grows the page by shared bounds. */
-    var pageFrom by mutableStateOf<Rect?>(null)
-        private set
-    var pageCorner = 0f
-        private set
+    val page = Presentation<Surface>(scope, covers = true)
+    val sheet = Presentation<Surface>(scope)
 
     /** Bumps only when another chat or a new one takes the stage, never on send. */
     var scene by mutableIntStateOf(0)
@@ -133,7 +113,10 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
     val flight = Flight()
     val cardHaze = HazeState()
 
-    internal fun originOf(s: Surface) = if (s.page) pageOrigin else sheetOrigin
+    fun presentation(s: Surface) = if (s.page) page else sheet
+
+    /** Nothing stands in front of the conversation, not even on its way out. */
+    val bare get() = page.item == null && sheet.item == null
 
     fun openDrawer() {
         scope.launch { drawer.animateTo(1f, Motion.drawer()) }
@@ -169,26 +152,17 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
         if (closeDrawer) this.closeDrawer()
     }
 
-    /** A page opened with [from] (the element's bounds in root pixels) grows out of it as one container. */
-    fun open(s: Surface, origin: String, from: Rect? = null, corner: Float = 0f) {
-        if (s.page) {
-            pageOrigin = origin
-            pageFrom = from
-            pageCorner = corner
-            scope.launch { pages.animateTo(s) }
-        } else {
-            sheetOrigin = origin
-            scope.launch { sheets.animateTo(s) }
-        }
-    }
+    /** Opens [s] out of the element marked with [origin]. */
+    fun open(s: Surface, origin: String) = presentation(s).open(s, origin)
 
     fun close(s: Surface) {
-        scope.launch { (if (s.page) pages else sheets).animateTo(null) }
+        val p = presentation(s)
+        if (p.item == s) p.close()
     }
 
     /** After a pick: the sheet and the drawer leave together. */
     fun done() {
-        scope.launch { sheets.animateTo(null) }
+        sheet.close()
         closeDrawer()
     }
 
@@ -198,6 +172,3 @@ class Shell(val m: AppModel, private val scope: CoroutineScope) {
 }
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("Shell lives in Main") }
-
-@OptIn(ExperimentalSharedTransitionApi::class)
-val LocalShared = staticCompositionLocalOf<SharedTransitionScope?> { null }

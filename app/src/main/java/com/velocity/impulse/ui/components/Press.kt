@@ -87,8 +87,9 @@ fun Modifier.pressable(
     val scope = rememberCoroutineScope()
     var refused by remember { mutableIntStateOf(0) }
     val moving = stretch && live && !calm
-    val flow = moving && shape != null
     val painted = shape != null && (rest != Color.Transparent || pressed != Color.Transparent)
+    // Only a painted fill can be the drop on its own; anything else (glass, an island) stretches whole.
+    val flow = moving && painted && rest != Color.Transparent
     val fade = when {
         blocked != null -> 0.55f
         enabled -> 1f
@@ -137,8 +138,9 @@ fun Modifier.pressable(
             val h = size.height.coerceAtLeast(1f)
             val sx = 1f + abs(p.x) / w * 0.9f
             val sy = 1f + abs(p.y) / h * 0.9f
-            scaleX = scale.value * sx / sqrt(sy)
-            scaleY = scale.value * sy / sqrt(sx)
+            val swell = blob.swell.value
+            scaleX = scale.value * swell * sx / sqrt(sy)
+            scaleY = scale.value * swell * sy / sqrt(sx)
             translationX = p.x * 0.45f
             translationY = p.y * 0.45f
             rotationY = lean.value.x * tilt

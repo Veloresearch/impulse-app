@@ -98,14 +98,16 @@ import com.velocity.impulse.ui.components.Field
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
-import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.liquidBody
+import com.velocity.impulse.ui.components.rememberLiquid
+import com.velocity.impulse.ui.components.spoken
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.flightLanding
 import com.velocity.impulse.ui.components.glass
-import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -146,9 +148,10 @@ fun TopIsland(m: AppModel, modifier: Modifier = Modifier) {
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Chrome.Side, vertical = 8.dp).height(Chrome.TopIsland),
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.align(Alignment.CenterStart).size(44.dp).graphicsLayer { alpha = if (shell.docked) 0f else 1f }.glass(shell.cardHaze, CircleShape)) {
-                IconBtn(Glyph.Sidebar, shell::openDrawer, tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !shell.docked, island = true)
-            }
+            IconBtn(
+                Glyph.Sidebar, shell::openDrawer, Modifier.align(Alignment.CenterStart).graphicsLayer { alpha = if (shell.docked) 0f else 1f },
+                tint = Ink.One, size = 44.dp, enabled = !shell.docked, glass = shell.cardHaze,
+            )
             Heading(m, shell, Modifier.padding(horizontal = 96.dp))
             Actions(m, shell, Modifier.align(Alignment.CenterEnd))
         }
@@ -203,47 +206,45 @@ private fun Heading(m: AppModel, shell: Shell, modifier: Modifier) {
         }
     }
 
-    MorphSource("pill", Surface.Model, modifier) {
-        Column(
-            Modifier.morph("pill", this, HeadShape)
-                .graphicsLayer {
-                    if (calm) return@graphicsLayer
-                    scaleX = 1f - 0.06f * pulse.value
-                    scaleY = scaleX
-                }
-                .pressable({ shell.open(Surface.Model, "pill") }, depth = 0.95f, feelOnDown = true)
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 10.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(Modifier.flightLanding(shell.flight)) {
-                Roll(
-                    title ?: if (m.temporary) tr("Temporary chat", "Czat tymczasowy") else tr("New chat", "Nowy czat"),
-                    Type.Body.copy(fontWeight = FontWeight.SemiBold),
-                    up = shell.sceneDir > 0,
-                )
+    Column(
+        modifier.grows(shell.sheet, "pill", HeadShape)
+            .graphicsLayer {
+                if (calm) return@graphicsLayer
+                scaleX = 1f - 0.06f * pulse.value
+                scaleY = scaleX
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedVisibility(
-                    kind == Kind.Loading || kind == Kind.Offline,
-                    enter = fadeIn(tween(Motion.M2)) + expandHorizontally(Motion.calmText()),
-                    exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(Motion.calmText()),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (seen.last == Kind.Offline) Icon(Glyph.Alert, Signal.Warn, size = 12.dp) else Spinner(accent, 11.dp)
-                        Spacer(Modifier.width(5.dp))
-                    }
+            .pressable({ shell.open(Surface.Model, "pill") }, depth = 0.95f, feelOnDown = true)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 10.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.flightLanding(shell.flight)) {
+            Roll(
+                title ?: if (m.temporary) tr("Temporary chat", "Czat tymczasowy") else tr("New chat", "Nowy czat"),
+                Type.Body.copy(fontWeight = FontWeight.SemiBold),
+                up = shell.sceneDir > 0,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AnimatedVisibility(
+                kind == Kind.Loading || kind == Kind.Offline,
+                enter = fadeIn(tween(Motion.M2)) + expandHorizontally(Motion.calmText()),
+                exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(Motion.calmText()),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (seen.last == Kind.Offline) Icon(Glyph.Alert, Signal.Warn, size = 12.dp) else Spinner(accent, 11.dp)
+                    Spacer(Modifier.width(5.dp))
                 }
-                Roll(
-                    label,
-                    Type.Meta.copy(fontWeight = FontWeight.Medium, color = if (kind == Kind.Offline) Signal.Warn else Ink.Three),
-                    Modifier.weight(1f, fill = false),
-                    up = seen.up,
-                )
-                Spacer(Modifier.width(3.dp))
-                Icon(Glyph.Down, Ink.Three, size = 11.dp)
             }
+            Roll(
+                label,
+                Type.Meta.copy(fontWeight = FontWeight.Medium, color = if (kind == Kind.Offline) Signal.Warn else Ink.Three),
+                Modifier.weight(1f, fill = false),
+                up = seen.up,
+            )
+            Spacer(Modifier.width(3.dp))
+            Icon(Glyph.Down, Ink.Three, size = 11.dp)
         }
     }
 }
@@ -262,8 +263,10 @@ private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
     val started = animateFloatAsState(if (empty) 0f else 1f, spec, label = "started")
     val temporary = m.temporary
     val dot by animateColorAsState(if (temporary) accent.copy(alpha = 0.2f) else Color.Transparent, tween(Motion.M2), label = "temporary")
+    val drop = rememberLiquid(0.6f)
+    // The capsule is one drop: it stretches whole, and the buttons in it only press.
     Row(
-        modifier.height(44.dp).glass(shell.cardHaze, Island).padding(horizontal = 2.dp),
+        modifier.height(44.dp).then(if (shell.calm) Modifier else Modifier.liquidBody(drop)).glass(shell.cardHaze, Island).padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Fold(shell, { 1f - started.value }) {
@@ -273,7 +276,7 @@ private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
                         view.feel(if (temporary) Feel.Off else Feel.On)
                         m.newChat(!temporary)
                     },
-                    CircleShape, dot, Tone.Raise, depth = 0.88f, enabled = empty, stretch = true, feel = null, role = Role.Switch,
+                    CircleShape, dot, Tone.Raise, depth = 0.88f, enabled = empty, feel = null, role = Role.Switch,
                 ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -284,7 +287,7 @@ private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
             Box(
                 Modifier.size(40.dp).pressable(
                     { shell.newChat() }, CircleShape, Color.Transparent, Tone.Raise,
-                    depth = 0.88f, enabled = !empty, stretch = true, feelOnDown = true,
+                    depth = 0.88f, enabled = !empty, feelOnDown = true,
                 ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -292,7 +295,15 @@ private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
             }
         }
         Fold(shell, { started.value }) {
-            IconBtn(Glyph.More, shell::openDetails, tint = Ink.One, fill = Color.Transparent, size = 40.dp, enabled = !empty, island = true)
+            Box(
+                Modifier.size(40.dp).semantics { contentDescription = Glyph.More.spoken() }.pressable(
+                    shell::openDetails, CircleShape, Color.Transparent, Tone.Raise,
+                    depth = 0.88f, enabled = !empty, feelOnDown = true,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Glyph.More, Ink.One, size = 19.dp)
+            }
         }
     }
 }

@@ -729,9 +729,7 @@ private fun Top(item: PreviewItem, haze: HazeState, modifier: Modifier, detail: 
             BasicText(item.name, style = Type.Meta.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
             BasicText(listOfNotNull(sizeOf(item.bytes).takeIf { item.bytes > 0 }, detail.ifEmpty { null }).joinToString(" · "), style = Type.Label)
         }
-        Box(Modifier.align(Alignment.CenterEnd).size(44.dp).glass(haze, CircleShape)) {
-            IconBtn(Glyph.Close, PreviewState::close, tint = Ink.One, fill = Color.Transparent, size = 44.dp, island = true)
-        }
+        IconBtn(Glyph.Close, PreviewState::close, Modifier.align(Alignment.CenterEnd), tint = Ink.One, size = 44.dp, glass = haze)
     }
 }
 

@@ -1,9 +1,12 @@
 package com.velocity.impulse.ui.screens
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -20,6 +23,8 @@ import android.text.TextPaint
 import android.text.style.BackgroundColorSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.velocity.impulse.R
 import com.velocity.impulse.data.Chat
@@ -71,7 +76,12 @@ fun exportChat(context: Context, chat: Chat, format: String, failed: (String) ->
 
 /** Puts a JPEG into the phone's Pictures/Impulse, where the gallery shows it. */
 fun savePicture(context: Context, jpeg: ByteArray, name: String): Boolean {
-    // shortcut: Android 8-9 also need WRITE_EXTERNAL_STORAGE (maxSdkVersion 28) granted; without it this returns false there.
+    if (Build.VERSION.SDK_INT < 29 && ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+        // shortcut: asks and reports this tap as not saved; the next tap saves. Upgrade to a result callback if Android 8-9 users complain.
+        generateSequence(context) { (it as? ContextWrapper)?.baseContext }.filterIsInstance<Activity>().firstOrNull()
+            ?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 0) }
+        return false
+    }
     return try {
         val cr = context.contentResolver
         val values = ContentValues().apply {

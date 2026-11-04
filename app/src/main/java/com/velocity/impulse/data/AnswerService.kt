@@ -39,11 +39,17 @@ class AnswerService : Service() {
             .build()
         // startForeground comes first even when nothing is left: stopping before it crashes on older Androids.
         ServiceCompat.startForeground(this, ONGOING, note, if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0)
+        started = true
         if (n == 0) stopSelf()
         return START_NOT_STICKY
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) = stopSelf()
+
+    override fun onDestroy() {
+        started = false
+        super.onDestroy()
+    }
 
     companion object {
         /** Opens the chat named by this extra. */
@@ -55,13 +61,18 @@ class AnswerService : Service() {
         @Volatile
         private var writing = 0
 
+        /** The service reached startForeground; stopping it before then crashes the app. */
+        @Volatile
+        private var started = false
+
         /** Runs the service while [count] chats are writing and stops it at zero. */
         fun keep(ctx: Context, count: Int) {
             val was = writing
             writing = count
             val intent = Intent(ctx, AnswerService::class.java)
             if (count == 0) {
-                if (was > 0) ctx.stopService(intent)
+                // Not started yet: onStartCommand sees zero and stops itself after startForeground.
+                if (was > 0 && started) ctx.stopService(intent)
                 return
             }
             if (count == was) return

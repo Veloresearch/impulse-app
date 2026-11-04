@@ -11,7 +11,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
@@ -127,7 +126,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -158,9 +156,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -179,7 +177,6 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -195,6 +192,8 @@ import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.components.Backdrop
+import com.velocity.impulse.ui.components.liquidBody
+import com.velocity.impulse.ui.components.rememberLiquid
 import com.velocity.impulse.ui.components.BackdropMood
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.CopyButton
@@ -204,14 +203,14 @@ import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.Markdown
-import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.Presentation
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
-import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.components.openPage
 import com.velocity.impulse.ui.components.plainText
 import com.velocity.impulse.ui.components.pressable
@@ -222,7 +221,6 @@ import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Squircle
-import com.velocity.impulse.ui.theme.Theme
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import kotlinx.coroutines.delay
@@ -317,7 +315,7 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
         },
     ) {
         Box(Modifier.fillMaxSize().glassSource(shell.cardHaze)) {
-            Backdrop(state = { mood })
+            Backdrop(state = { mood }, still = { !shell.bare || shell.drawer.value != 0f })
             Box(Modifier.fillMaxSize().graphicsLayer { translationY = lift() }) {
                 scenes.AnimatedContent(
                     Modifier.fillMaxSize(),
@@ -340,18 +338,16 @@ fun Conversation(m: AppModel, modifier: Modifier = Modifier) {
             }
         }
         Box(Modifier.fillMaxSize().graphicsLayer { translationY = lift() }) {
-            Starters(fresh && bare && m.status?.model != null, { composerH + 4.dp.roundToPx() }, write)
-            Composer(m, toast, draft, landed) { composerH = it }
+            // Under the composer, so the plus menu that grows out of it covers this button.
             AnimatedVisibility(
                 jump,
                 Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -(composerH + 12.dp.roundToPx())) },
                 enter = if (shell.calm) fadeIn(tween(Motion.M1)) else scaleIn(spring(0.6f, 600f), 0.6f) + fadeIn(tween(Motion.M1)),
                 exit = if (shell.calm) fadeOut(tween(90)) else scaleOut(tween(Motion.M1), 0.8f) + fadeOut(tween(90)),
             ) {
-                Box(Modifier.size(40.dp).glass(shell.cardHaze, CircleShape)) {
-                    IconBtn(Glyph.Down, { scope.launch { front.value?.animateScrollToItem(0) } }, fill = Color.Transparent, island = true)
-                }
+                IconBtn(Glyph.Down, { scope.launch { front.value?.animateScrollToItem(0) } }, glass = shell.cardHaze)
             }
+            Composer(m, toast, draft, landed) { composerH = it }
             ToastIsland(toast) { composerH + (if (jump) 64.dp else 12.dp).roundToPx() }
         }
     }
@@ -424,56 +420,6 @@ private fun AnimatedContentScope.Scene(
             } else {
                 val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 Greeting(m, Modifier.fillMaxSize().padding(top = top + Chrome.Top, bottom = with(d) { composerH().toDp() }))
-            }
-        }
-    }
-}
-
-private class Starter(val title: String, val hint: String, val words: String, val mark: @Composable (Color) -> Unit)
-
-/** Ways to begin, floating over the empty chat; a tap starts the question in the composer. */
-@Composable
-private fun BoxScope.Starters(visible: Boolean, lift: Density.() -> Int, onPick: (String) -> Unit) {
-    val calm = LocalShell.current.calm
-    val accent = LocalAccent.current
-    val list = remember {
-        listOf(
-            Starter(tr("Help me write", "Pomóż mi napisać"), tr("an email, a post, a note", "mail, post, notatkę"), tr("Help me write ", "Pomóż mi napisać ")) { Drawn(DrawScope::penMark, it) },
-            Starter(tr("Brainstorm", "Burza mózgów"), tr("ideas for anything", "pomysły na wszystko"), tr("Brainstorm ideas for ", "Wymyśl pomysły na ")) { Icon(Glyph.Sparkle, it, size = 18.dp) },
-            Starter(tr("Explain", "Wyjaśnij"), tr("anything, simply", "cokolwiek, prosto"), tr("Explain ", "Wyjaśnij ")) { Icon(Glyph.Brain, it, size = 18.dp) },
-            Starter(tr("Write code", "Napisz kod"), tr("a script, a fix, a query", "skrypt, poprawkę, zapytanie"), tr("Write code that ", "Napisz kod, który ")) { Drawn(DrawScope::codeMark, it) },
-            Starter(tr("Search the web", "Szukaj w sieci"), tr("what is happening now", "co dzieje się teraz"), tr("Search the web for ", "Wyszukaj w sieci ")) { Icon(Glyph.Globe, it, size = 18.dp) },
-            Starter(tr("Work out", "Policz"), tr("numbers, plans, budgets", "liczby, plany, budżety"), tr("Work out ", "Policz ")) { Drawn(DrawScope::sumMark, it) },
-        )
-    }
-    AnimatedVisibility(
-        visible,
-        Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -lift()) },
-        enter = fadeIn(tween(Motion.M2)),
-        exit = fadeOut(tween(Motion.M1)) + slideOutVertically(tween(Motion.M2, easing = Motion.Leave)) { it / 4 },
-    ) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            list.forEachIndexed { i, s ->
-                Column(
-                    Modifier
-                        .animateEnterExit(
-                            enter = if (calm) EnterTransition.None else fadeIn(tween(Motion.M2, delayMillis = 50 * i)) +
-                                slideInVertically(spring(0.78f, 300f)) { it / 2 } + scaleIn(spring(0.78f, 300f), 0.92f),
-                            exit = ExitTransition.None,
-                        )
-                        .width(148.dp)
-                        .shadow(10.dp, Shapes.Card, clip = false, ambientColor = Color.Black.copy(alpha = 0.16f * Theme.palette.shade), spotColor = Color.Black.copy(alpha = 0.24f * Theme.palette.shade))
-                        .pressable({ onPick(s.words) }, Shapes.Card, Tone.Float, Tone.Raise, depth = 0.96f, tilt = 6f)
-                        .padding(14.dp),
-                ) {
-                    s.mark(accent)
-                    Spacer(Modifier.height(12.dp))
-                    BasicText(s.title, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    BasicText(s.hint, style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
             }
         }
     }
@@ -1059,23 +1005,12 @@ private class Sweep(private val at: State<Float>, private val base: Color, priva
 private const val ThoughtRows = 5
 
 /**
- * The thought from about 900 characters back, cut where a line or word starts. The cut moves only
- * every 900 characters, so the lines on screen keep their wrapping while new ones arrive.
- */
-private fun thoughtTail(t: String): String {
-    val cut = max(0, (t.length - 900) / 900 * 900)
-    if (cut == 0) return t.trim()
-    val nl = t.indexOf('\n', cut).takeIf { it >= 0 && it < cut + 300 }
-    val at = nl?.plus(1) ?: (t.indexOf(' ', cut).takeIf { it >= 0 }?.plus(1) ?: cut)
-    return t.substring(at).trim()
-}
-
-/**
  * The latest lines of a thought as it arrives, in a clipped window as tall as its last
  * [ThoughtRows] lines. New words push the text up by exactly what it grew and it glides back,
  * so lines scroll up and out under a soft fade and never sit on each other. The window's height
  * is animated in layout and the scroll on the text's own layer, so the words recompose only when
- * the thought changes.
+ * the thought changes. Lines long gone are dropped from the top, always at the start of a line
+ * on screen: the lines below wrap exactly as before and the window does not move.
  */
 @Composable
 private fun ThoughtWindow(thought: () -> String, calm: Boolean) {
@@ -1085,7 +1020,14 @@ private fun ThoughtWindow(thought: () -> String, calm: Boolean) {
     val slide = remember { Animatable(0f) }
     val tall = remember { floatArrayOf(0f) }
     var over by remember { mutableStateOf(false) }
-    val tail by remember { derivedStateOf { thoughtTail(thought()) } }
+    var cut by remember { mutableIntStateOf(0) }
+    val tail by remember {
+        derivedStateOf {
+            val t = thought()
+            val from = if (cut > t.length) 0 else cut
+            t.substring(from).let { if (from == 0) it.trimStart() else it }.trimEnd()
+        }
+    }
     val glide = spring(1f, 320f, 0.5f)
 
     BasicText(
@@ -1116,12 +1058,20 @@ private fun ThoughtWindow(thought: () -> String, calm: Boolean) {
             val first = tall[0] == 0f
             tall[0] = full
             over = n > ThoughtRows
-            if (calm || first || grew < 0f) {
+            if (n > ThoughtRows + 20) {
+                val drop = n - ThoughtRows - 2
+                val t = thought()
+                if (cut > t.length) cut = 0
+                val lead = if (cut == 0) t.length - t.trimStart().length else 0
+                cut += lead + r.getLineStart(drop)
+                tall[0] -= r.getLineTop(drop)
+            }
+            if (calm || first || grew < -1f) {
                 scope.launch {
                     slide.snapTo(0f)
                     height.snapTo(target)
                 }
-            } else if (grew > 0f) {
+            } else if (grew > 1f) {
                 scope.launch {
                     slide.snapTo(slide.value + grew)
                     slide.animateTo(0f, glide)
@@ -1748,7 +1698,7 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
     val scope = rememberCoroutineScope()
     val field = draft.field
     val attached = draft.attached
-    var adding by remember(draft) { mutableStateOf(false) }
+    val menu = remember(draft) { Presentation<Unit>(scope) }
     var lines by remember { mutableIntStateOf(1) }
     val vision = m.status?.model?.vision == true
     val take = rememberUpdatedState<(List<Uri>) -> Unit> { uris ->
@@ -1882,8 +1832,9 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
         }
     }
 
-    val grow = remember(draft) { Animatable(0f) }
     val plusAt = remember { mutableStateOf(Rect.Zero) }
+    val pillAt = remember { mutableStateOf(Rect.Zero) }
+    val composerDrop = rememberLiquid(0.35f)
 
     Column(
         Modifier.align(Alignment.BottomCenter).onSizeChanged { onHeight(it.height) }
@@ -1891,6 +1842,9 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
     ) {
         Column(
             Modifier.fillMaxWidth()
+                .onGloballyPositioned { pillAt.value = it.boundsInWindow() }
+                // The drop goes outside animateContentSize, whose clip would cut the stretched corners.
+                .then(if (calm) Modifier else Modifier.liquidBody(composerDrop))
                 .animateContentSize(spring(1f, 500f))
                 .glass(shell.cardHaze, pill)
                 .workLight({ glow.value }, { turn.value }, pill, accent)
@@ -1932,12 +1886,12 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
                     enter = fadeIn(tween(Motion.M2)) + expandHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
                     exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
                 ) {
-                    // While the menu is open the island is the plus, so the plus itself steps aside.
                     IconBtn(
-                        Glyph.Plus, { adding = true },
-                        Modifier.onPlaced { plusAt.value = Rect(it.positionInRoot(), it.size.toSize()) }
-                            .graphicsLayer { alpha = if (grow.value > 0f) 0f else 1f },
+                        Glyph.Plus, { if (menu.open) menu.close() else menu.open(Unit, "plus") },
+                        Modifier.onGloballyPositioned { plusAt.value = it.boundsInWindow() }
+                            .graphicsLayer { if (!calm) rotationZ = 45f * menu.progress.value },
                         tint = Ink.Two, fill = Color.Transparent, size = 44.dp,
+                        description = if (menu.open) tr("Close", "Zamknij") else tr("Add", "Dodaj"),
                     )
                 }
                 BasicTextField(
@@ -1994,16 +1948,14 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
                     label = "send",
                 ) { choose ->
                     if (choose) {
-                        MorphSource("composer-model", Surface.Model) {
-                            Btn(
-                                tr("Model", "Model"),
-                                { shell.open(Surface.Model, "composer-model") },
-                                Modifier.morph("composer-model", this, Shapes.ControlLg),
-                                Variant.Standard,
-                                Glyph.Models,
-                                height = 44.dp,
-                            )
-                        }
+                        Btn(
+                            tr("Model", "Model"),
+                            { shell.open(Surface.Model, "composer-model") },
+                            Modifier.grows(shell.sheet, "composer-model", Shapes.ControlLg),
+                            Variant.Standard,
+                            Glyph.Models,
+                            height = 44.dp,
+                        )
                     } else {
                         MeterRing({ meter?.let { if (it.window > 0) it.used.toFloat() / it.window else null } }) {
                             SendButton(
@@ -2032,13 +1984,12 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
         }
     }
     AddIsland(
-        open = adding,
-        grow = grow,
-        plus = plusAt,
-        onClose = { adding = false },
-        onCamera = { adding = false; pickers.camera() },
-        onPhotos = { adding = false; pickers.photos() },
-        onFiles = { adding = false; pickers.files() },
+        menu,
+        plusAt,
+        pillAt,
+        onCamera = { menu.close(); pickers.camera() },
+        onPhotos = { menu.close(); pickers.photos() },
+        onFiles = { menu.close(); pickers.files() },
     )
 }
 

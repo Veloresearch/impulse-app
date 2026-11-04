@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -102,6 +103,21 @@ fun Modifier.liquidTouch(l: Liquid): Modifier = pointerInput(l) {
         val most = reach * 18f
         l.release(if (speed > most) v * (most / speed) else v)
     }
+}
+
+/**
+ * The whole element is the drop: it swells under the finger and stretches toward it at constant
+ * area, glass and all. For big bodies like the composer, which take a smaller [Liquid.give].
+ */
+fun Modifier.liquidBody(l: Liquid): Modifier = liquidTouch(l).graphicsLayer {
+    val p = l.pull.value
+    val sx = 1f + abs(p.x) / size.width.coerceAtLeast(1f) * 0.9f
+    val sy = 1f + abs(p.y) / size.height.coerceAtLeast(1f) * 0.9f
+    val swell = 1f + (l.swell.value - 1f) * minOf(1f, 56.dp.toPx() / size.minDimension.coerceAtLeast(1f))
+    scaleX = swell * sx / sqrt(sy)
+    scaleY = swell * sy / sqrt(sx)
+    translationX = p.x * 0.45f
+    translationY = p.y * 0.45f
 }
 
 /**

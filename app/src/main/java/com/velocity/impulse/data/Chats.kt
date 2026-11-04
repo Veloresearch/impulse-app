@@ -357,16 +357,26 @@ class ChatCache(private val file: File) {
         o.optJSONArray("chats").objects().map(::Chat)
     }.getOrDefault(emptyList())
 
-    fun save(chats: List<Chat>) {
-        val o = JSONObject()
-            .put("head", head)
-            .put("revs", JSONObject(revs as Map<*, *>))
-            .put("dirty", JSONArray(dirty.toList()))
-            .put("gone", JSONArray(gone.toList()))
-            .put("chats", JSONArray(chats.map { it.raw }))
-        val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(o.toString())
-        tmp.renameTo(file)
+    /**
+     * Copies where the cache stands now, on the thread that changes it; the returned write is
+     * safe to run elsewhere. Chats are never changed in place, so the list itself is not copied.
+     */
+    fun snapshot(chats: List<Chat>): () -> Unit {
+        val h = head
+        val r = HashMap(revs)
+        val d = dirty.toList()
+        val g = gone.toList()
+        return {
+            val o = JSONObject()
+                .put("head", h)
+                .put("revs", JSONObject(r as Map<*, *>))
+                .put("dirty", JSONArray(d))
+                .put("gone", JSONArray(g))
+                .put("chats", JSONArray(chats.map { it.raw }))
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(o.toString())
+            tmp.renameTo(file)
+        }
     }
 
     fun forget() {

@@ -1,16 +1,9 @@
 package com.velocity.impulse.ui.components
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -18,6 +11,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,6 +49,7 @@ import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.Motion
+import com.velocity.impulse.ui.theme.Radius
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Space
 import com.velocity.impulse.ui.theme.Tone
@@ -133,83 +128,75 @@ private fun Handle() {
  * Dragged down it follows the finger; let go past a quarter of its height, or flicked, it closes
  * from where the finger left it. Hosted only by the shell.
  */
-@OptIn(ExperimentalAnimationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
-fun MorphSheet(surface: Surface, content: @Composable ColumnScope.() -> Unit) {
+fun BoxScope.MorphSheet(surface: Surface, content: @Composable ColumnScope.() -> Unit) {
     val shell = LocalShell.current
-    val calm = shell.calm
     val view = LocalView.current
     val tallest = LocalConfiguration.current.screenHeightDp.dp * 0.88f
     val stretch = with(LocalDensity.current) { 24.dp.toPx() }
-    shell.sheetTransition.AnimatedVisibility(
-        { it == surface },
-        enter = if (calm) fadeIn(tween(Motion.M2)) else EnterTransition.None,
-        exit = if (calm) fadeOut(tween(Motion.M2)) else ExitTransition.None,
+    val pull = remember { Animatable(0f) }
+    var h by remember { mutableFloatStateOf(1f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(shell.sheet.open) { if (shell.sheet.open) pull.snapTo(0f) }
+    fun follow(d: Float, floor: Boolean = false) {
+        scope.launch {
+            val old = pull.value
+            val new = if (floor) (old + d).coerceAtLeast(0f) else old + d
+            pull.snapTo(if (new < 0f) rubber(new, stretch) else new)
+            val edge = 0.25f * h
+            if ((old - edge) * (pull.value - edge) < 0f) view.feel(Feel.Tick)
+        }
+    }
+    suspend fun settle(v: Float) {
+        if (pull.value > 0.25f * h || v > 1200f) shell.close(surface)
+        else pull.animateTo(0f, spring(0.7f, 500f))
+    }
+    // A list inside the sheet scrolls first; once it is at its top, pulling down moves the sheet.
+    val pullDown = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || available.y >= 0f || pull.value <= 0f) return Offset.Zero
+                val used = maxOf(available.y, -pull.value)
+                follow(used, floor = true)
+                return Offset(0f, used)
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || available.y <= 0f) return Offset.Zero
+                follow(available.y)
+                return Offset(0f, available.y)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pull.value <= 0f) return Velocity.Zero
+                settle(available.y)
+                return available
+            }
+        }
+    }
+    Presented(
+        shell.sheet,
+        Modifier.align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(Space.S2)
+            .offset { IntOffset(0, pull.value.roundToInt()) }
+            .fillMaxWidth()
+            .heightIn(max = tallest),
+        Radius.Sheet,
+        Tone.Float,
+        only = surface,
+        scrim = 0.45f,
     ) {
-        val pull = remember { Animatable(0f) }
-        var h by remember { mutableFloatStateOf(1f) }
-        val scope = rememberCoroutineScope()
-        fun follow(d: Float, floor: Boolean = false) {
-            scope.launch {
-                val old = pull.value
-                val new = if (floor) (old + d).coerceAtLeast(0f) else old + d
-                pull.snapTo(if (new < 0f) rubber(new, stretch) else new)
-                val edge = 0.25f * h
-                if ((old - edge) * (pull.value - edge) < 0f) view.feel(Feel.Tick)
-            }
-        }
-        suspend fun settle(v: Float) {
-            if (pull.value > 0.25f * h || v > 1200f) shell.close(surface)
-            else pull.animateTo(0f, spring(0.7f, 500f))
-        }
-        // A list inside the sheet scrolls first; once it is at its top, pulling down moves the sheet.
-        val pullDown = remember {
-            object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    if (source != NestedScrollSource.UserInput || available.y >= 0f || pull.value <= 0f) return Offset.Zero
-                    val used = maxOf(available.y, -pull.value)
-                    follow(used, floor = true)
-                    return Offset(0f, used)
-                }
-
-                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                    if (source != NestedScrollSource.UserInput || available.y <= 0f) return Offset.Zero
-                    follow(available.y)
-                    return Offset(0f, available.y)
-                }
-
-                override suspend fun onPreFling(available: Velocity): Velocity {
-                    if (pull.value <= 0f) return Velocity.Zero
-                    settle(available.y)
-                    return available
-                }
-            }
-        }
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                Modifier.fillMaxSize()
-                    .animateEnterExit(fadeIn(tween(Motion.M2)), fadeOut(tween(Motion.M2)))
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(remember { MutableInteractionSource() }, null) { shell.close(surface) },
-            )
-            Column(
-                Modifier.align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(Space.S2)
-                    .offset { IntOffset(0, pull.value.roundToInt()) }
-                    .morph(shell.sheetOrigin, this@AnimatedVisibility, Shapes.Sheet)
-                    .background(Tone.Float, Shapes.Sheet)
-                    .fillMaxWidth()
-                    .heightIn(max = tallest)
-                    .onSizeChanged { h = it.height.toFloat().coerceAtLeast(1f) }
-                    .draggable(rememberDraggableState { follow(it) }, Orientation.Vertical, onDragStopped = { settle(it) })
-                    .nestedScroll(pullDown)
-                    .morphBody()
-                    .padding(start = Space.S4, end = Space.S4, bottom = Space.S4),
-            ) {
-                Handle()
-                content()
-            }
+        Column(
+            Modifier.fillMaxWidth()
+                .background(Tone.Float, Shapes.Sheet)
+                .onSizeChanged { h = it.height.toFloat().coerceAtLeast(1f) }
+                .draggable(rememberDraggableState { follow(it) }, Orientation.Vertical, onDragStopped = { settle(it) })
+                .nestedScroll(pullDown)
+                .padding(start = Space.S4, end = Space.S4, bottom = Space.S4),
+        ) {
+            Handle()
+            content()
         }
     }
 }

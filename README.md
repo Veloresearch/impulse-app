@@ -37,7 +37,25 @@
   <a href="https://github.com/Veloresearch/impulse">Impulse for your computer</a>
 </p>
 
-<!-- SCREENS -->
+<p align="center">
+  <img src="docs/screens/light-chat.jpg" width="24%" alt="A conversation">
+  <img src="docs/screens/light-plus.jpg" width="24%" alt="Adding a photo or a file">
+  <img src="docs/screens/light-details.jpg" width="24%" alt="The chat's details: speed and Momentum">
+  <img src="docs/screens/light-drawer.jpg" width="24%" alt="Your chats">
+</p>
+<p align="center">
+  <img src="docs/screens/dark-chat.jpg" width="24%" alt="A conversation, dark">
+  <img src="docs/screens/dark-models.jpg" width="24%" alt="The models on your computer, dark">
+  <img src="docs/screens/dark-details.jpg" width="24%" alt="The chat's details, dark">
+  <img src="docs/screens/dark-settings.jpg" width="24%" alt="Settings, dark">
+</p>
+<p align="center">
+  <img src="docs/screens/amoled-chat.jpg" width="24%" alt="A conversation, AMOLED">
+  <img src="docs/screens/amoled-plus.jpg" width="24%" alt="Adding a photo or a file, AMOLED">
+  <img src="docs/screens/amoled-models.jpg" width="24%" alt="The models on your computer, AMOLED">
+  <img src="docs/screens/amoled-settings.jpg" width="24%" alt="Settings, AMOLED">
+</p>
+<p align="center"><sub>Light, dark and AMOLED.</sub></p>
 
 ## What it does
 

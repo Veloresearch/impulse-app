@@ -147,6 +147,7 @@ fun ConnectScreen(m: AppModel) {
         open = if (open == f) null else f
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Space.S5),
         verticalArrangement = Arrangement.spacedBy(Space.S6),
@@ -262,6 +263,9 @@ fun ConnectScreen(m: AppModel) {
             )
         }
         Spacer(Modifier.height(Space.S5))
+    }
+    // A link from a web page or another app is never followed without asking.
+    SwitchComputer(m)
     }
 }
 
@@ -531,7 +535,11 @@ fun SwitchComputer(m: AppModel) {
     val base = remember(last) { runCatching { Server.parse(last).base }.getOrNull() }
     Sheet(link != null, m::dropConnectLink) {
         Column(Modifier.padding(top = Space.S2), verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-            BasicText(tr("Switch to this computer?", "Przełączyć na ten komputer?"), Modifier.semantics { heading() }, style = Type.Title)
+            val first = m.server == null
+            BasicText(
+                if (first) tr("Connect to this computer?", "Połączyć z tym komputerem?") else tr("Switch to this computer?", "Przełączyć na ten komputer?"),
+                Modifier.semantics { heading() }, style = Type.Title,
+            )
             if (base != null) {
                 val way = Link.of(base)
                 Row(
@@ -552,7 +560,7 @@ fun SwitchComputer(m: AppModel) {
                 Problem(m.error)
                 Spacer(Modifier.height(Space.S2))
                 Btn(
-                    if (m.busy) tr("Connecting…", "Łączenie…") else tr("Switch", "Przełącz"), { m.connect(last) },
+                    if (m.busy) tr("Connecting…", "Łączenie…") else if (first) tr("Connect", "Połącz") else tr("Switch", "Przełącz"), { m.connect(last) },
                     Modifier.fillMaxWidth(), Variant.Primary, enabled = !m.busy,
                 )
                 Btn(tr("Not now", "Nie teraz"), m::dropConnectLink, Modifier.fillMaxWidth(), Variant.Quiet)

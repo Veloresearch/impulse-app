@@ -187,6 +187,21 @@ object Updater {
         val part = File(dir, r.file + ".part")
         val sha = MessageDigest.getInstance("SHA-256")
         val url = "https://github.com/$Repo/releases/download/${r.tag}/${r.file}"
+        try {
+            download(url, r, part, sha)
+        } catch (e: Throwable) {
+            part.delete()
+            throw e
+        }
+        val sum = sha.digest().joinToString("") { "%02x".format(it) }
+        if (sum != r.sha256 || (r.bytes > 0 && part.length() != r.bytes)) {
+            part.delete()
+            throw Mismatch()
+        }
+        if (!part.renameTo(apk(ctx, r))) throw IOException("rename")
+    }
+
+    private suspend fun download(url: String, r: Release, part: File, sha: MessageDigest) {
         http.newCall(Request.Builder().url(url).build()).execute().use { res ->
             if (!res.isSuccessful) throw IOException("HTTP ${res.code}")
             val body = res.body ?: throw IOException("empty")
@@ -207,12 +222,6 @@ object Updater {
                 }
             }
         }
-        val sum = sha.digest().joinToString("") { "%02x".format(it) }
-        if (sum != r.sha256 || (r.bytes > 0 && part.length() != r.bytes)) {
-            part.delete()
-            throw Mismatch()
-        }
-        if (!part.renameTo(apk(ctx, r))) throw IOException("rename")
     }
 }
 

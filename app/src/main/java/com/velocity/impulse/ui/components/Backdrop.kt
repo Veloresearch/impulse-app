@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -20,6 +21,7 @@ import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Theme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
@@ -61,9 +63,13 @@ private class Drift {
 
     private fun near(p: Pace) = abs(speed - p.speed) + abs(breath - p.breath) + abs(flow - p.flow) + abs(glow - p.glow) < 0.004f
 
-    suspend fun run(mood: () -> BackdropMood) {
+    suspend fun run(mood: () -> BackdropMood, still: () -> Boolean) {
         var last = withFrameNanos { it }
         while (true) {
+            if (still()) {
+                snapshotFlow { still() }.first { !it }
+                last = withFrameNanos { it }
+            }
             val now = withFrameNanos { it }
             val dt = ((now - last) / 1e9f).coerceAtMost(0.1f)
             last = now
@@ -78,8 +84,8 @@ private class Drift {
             phase += dt * speed * 0.09f
             breathPhase += dt * rate
             frame = now
-            // Resting, the glows move well under a pixel a frame; twenty frames a second is plenty.
-            if (m == BackdropMood.Idle && near(p)) delay(40)
+            // Resting, the glows move a pixel or two a step; every redraw also re-blurs the glass above them.
+            if (m == BackdropMood.Idle && near(p)) delay(100)
         }
     }
 
@@ -99,14 +105,15 @@ private class Drift {
 /**
  * The living ground behind the conversation: a few very soft glows in the accent drifting over
  * whatever is beneath. Thinking makes them breathe and drift faster, writing draws them toward the
- * composer, idle lets them settle. Only drawing is invalidated per frame, never composition.
+ * composer, idle lets them settle. Only drawing is invalidated per frame, never composition. They
+ * hold [still] while something moves in front, so a transition never pays for re-blurring the glass.
  */
 @Composable
-fun Backdrop(state: () -> BackdropMood, modifier: Modifier = Modifier) {
+fun Backdrop(state: () -> BackdropMood, still: () -> Boolean, modifier: Modifier = Modifier) {
     val accent = LocalAccent.current
     val calm = LocalReduceMotion.current
     val drift = remember { Drift() }
-    if (!calm) LaunchedEffect(drift) { drift.run(state) }
+    if (!calm) LaunchedEffect(drift) { drift.run(state, still) }
     Spacer(
         modifier.fillMaxSize().drawWithCache {
             val radius = maxOf(size.width, size.height) * 0.62f

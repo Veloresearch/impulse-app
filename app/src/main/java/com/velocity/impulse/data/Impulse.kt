@@ -5,10 +5,12 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -104,10 +106,16 @@ data class Server(val base: String, val accessId: String? = null, val accessSecr
         /** A scanned or typed address: a plain URL or `impulse://connect?u=…&cid=…&csec=…`. */
         fun parse(raw: String): Server {
             val s = raw.trim()
-            if (!s.startsWith("impulse://")) return Server(Impulse.normalize(s))
+            if (!s.startsWith("impulse://")) return Server(checked(s))
             val q = android.net.Uri.parse(s)
             val u = q.getQueryParameter("u") ?: throw ImpulseError("This code has no address in it.")
-            return Server(Impulse.normalize(u), q.getQueryParameter("cid"), q.getQueryParameter("csec"))
+            return Server(checked(u), q.getQueryParameter("cid"), q.getQueryParameter("csec"))
+        }
+
+        private fun checked(raw: String): String = Impulse.normalize(raw).also {
+            if (it.toHttpUrlOrNull() == null || it.substringBefore("://") !in setOf("http", "https")) {
+                throw ImpulseError("That does not look like an address.")
+            }
         }
     }
 }
@@ -153,7 +161,11 @@ class Impulse(private val server: Server, private val token: String? = null) {
                     val message = (e as? JSONObject)?.optString("message") ?: (e as? String)
                     throw ImpulseError(message?.takeIf { it.isNotBlank() } ?: "Impulse answered ${resp.code}.", (e as? JSONObject)?.optString("code"), resp.code)
                 }
-                json ?: JSONObject()
+                // A sign-in page from hotel Wi-Fi or Cloudflare Access is a 200 too, and is no answer.
+                json ?: if (!text.trimStart().startsWith("<")) JSONObject() else throw ImpulseError(
+                    "Something other than Impulse answered at ${base.substringAfter("://")}. A Wi-Fi or Cloudflare sign-in page may be in the way.",
+                    status = resp.code,
+                )
             }
         } catch (e: IOException) {
             throw ImpulseError("Cannot reach Impulse at ${base.substringAfter("://")}.")
@@ -482,7 +494,8 @@ class Impulse(private val server: Server, private val token: String? = null) {
             else -> body.put("thinking", true).put("reasoning_effort", effort)
         }
         val c: Call = slow.newCall(request("/api/v2/chat").post(body.toString().toRequestBody(JSON)).build())
-        try {
+        // Read in a child, so awaitClose is reached at once and Stop cancels the socket mid-read.
+        launch { try {
             c.execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val text = resp.body?.string().orEmpty()
@@ -519,7 +532,7 @@ class Impulse(private val server: Server, private val token: String? = null) {
             close(if (c.isCanceled()) null else ImpulseError("The connection to Impulse dropped mid-answer."))
         } catch (e: Exception) {
             close(e)
-        }
+        } }
         awaitClose { c.cancel() }
     }.flowOn(Dispatchers.IO)
 

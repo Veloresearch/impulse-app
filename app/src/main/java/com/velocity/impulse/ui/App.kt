@@ -7,16 +7,7 @@ import android.view.View
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.ExperimentalTransitionApi
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -60,18 +51,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -82,7 +73,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.zIndex
@@ -92,13 +82,12 @@ import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.FlightOverlay
 import com.velocity.impulse.ui.components.Glyph
+import com.velocity.impulse.ui.components.Presented
 import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.MorphSheet
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
-import com.velocity.impulse.ui.components.morph
-import com.velocity.impulse.ui.components.morphBody
 import com.velocity.impulse.ui.components.rubber
 import com.velocity.impulse.ui.screens.ComputerPage
 import com.velocity.impulse.ui.screens.ConnectScreen
@@ -190,45 +179,38 @@ fun App(m: AppModel) {
  * never slides over the conversation: the card slides aside and recedes while the drawer comes
  * forward out of the room.
  */
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalTransitionApi::class)
 @Composable
 private fun Main(m: AppModel) {
     val scope = rememberCoroutineScope()
     val shell = remember { Shell(m, scope) }
     shell.calm = LocalReduceMotion.current
-    shell.pageTransition = rememberTransition(shell.pages, "page")
-    shell.sheetTransition = rememberTransition(shell.sheets, "sheet")
-    val pageDepth = shell.pageTransition.animateFloat({ Motion.morph() }, "pd") { if (it != null) 1f else 0f }
-    val sheetDepth = shell.sheetTransition.animateFloat({ Motion.morph() }, "sd") { if (it != null) 1f else 0f }
-    val depth = { max(pageDepth.value, sheetDepth.value) }
+    val depth = { max(shell.page.progress.value, shell.sheet.progress.value) }
 
-    SharedTransitionLayout(Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalShell provides shell, LocalShared provides this) {
-            BoxWithConstraints(Modifier.fillMaxSize().background(Tone.Void)) {
-                val docked = maxWidth >= 720.dp
-                shell.docked = docked
-                shell.drawerWidth = min(maxWidth - 64.dp, 340.dp)
-                if (docked) {
-                    LaunchedEffect(Unit) { shell.drawer.snapTo(1f) }
-                    Row(Modifier.fillMaxSize().recede(shell, depth)) {
-                        Drawer(m, Modifier.width(shell.drawerWidth).fillMaxHeight())
-                        Card(m, shell, Modifier.weight(1f).fillMaxHeight().background(Tone.App))
-                    }
-                } else {
-                    Phone(m, shell, depth)
+    CompositionLocalProvider(LocalShell provides shell) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(Tone.Void)) {
+            val docked = maxWidth >= 720.dp
+            shell.docked = docked
+            shell.drawerWidth = min(maxWidth - 64.dp, 340.dp)
+            if (docked) {
+                LaunchedEffect(Unit) { shell.drawer.snapTo(1f) }
+                Row(Modifier.fillMaxSize().recede(shell, depth)) {
+                    Drawer(m, Modifier.width(shell.drawerWidth).fillMaxHeight())
+                    Card(m, shell, Modifier.weight(1f).fillMaxHeight().background(Tone.App))
                 }
-                PageHost(Surface.Settings, tr("Settings", "Ustawienia")) { s, scroll -> SettingsPage(m, s, scroll) }
-                PageHost(Surface.Computer, tr("Computer", "Komputer")) { s, scroll -> ComputerPage(m, s, scroll) }
-                PageHost(Surface.Models, tr("Models", "Modele")) { _, _ -> ModelsPage(m) }
-                PageHost(Surface.Contexts, tr("Contexts", "Konteksty")) { _, _ -> ContextsPage(m) }
-                MorphSheet(Surface.Model) { ModelSheetBody(m) }
-                MorphSheet(Surface.Context) { ContextSheetBody(m) }
-                VoiceHost(m)
-                FlightOverlay(shell.flight)
-                Backs(shell)
-                PreviewHost()
-                SwitchComputer(m)
+            } else {
+                Phone(m, shell, depth)
             }
+            PageHost(Surface.Settings, tr("Settings", "Ustawienia")) { SettingsPage(m, it) }
+            PageHost(Surface.Computer, tr("Computer", "Komputer")) { ComputerPage(m, it) }
+            PageHost(Surface.Models, tr("Models", "Modele")) { ModelsPage(m) }
+            PageHost(Surface.Contexts, tr("Contexts", "Konteksty")) { ContextsPage(m) }
+            MorphSheet(Surface.Model) { ModelSheetBody(m) }
+            MorphSheet(Surface.Context) { ContextSheetBody(m) }
+            VoiceHost(m)
+            FlightOverlay(shell.flight)
+            Backs(shell)
+            PreviewHost()
+            SwitchComputer(m)
         }
     }
 }
@@ -353,9 +335,7 @@ private fun Modifier.sideSwipe(shell: Shell, wPx: Float, scope: CoroutineScope, 
         }
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            val free = shell.pages.currentState == null && shell.pages.targetState == null &&
-                shell.sheets.currentState == null && shell.sheets.targetState == null
-            if (!free) return@awaitEachGesture
+            if (!shell.bare) return@awaitEachGesture
             val slop = viewConfiguration.touchSlop
             var change = down
             while (true) {
@@ -395,151 +375,71 @@ private fun Modifier.sideSwipe(shell: Shell, wPx: Float, scope: CoroutineScope, 
         }
     }
 
-/** Pushes the planes behind a page or sheet back: smaller, rounded, washed dark. */
-private fun Modifier.recede(shell: Shell, amount: () -> Float) = graphicsLayer {
+/**
+ * Pushes the planes behind a page or sheet back: smaller, rounded, washed dark. The scale is a
+ * draw-time transform over one cached layer, so nothing inside is laid out, re-blurred or
+ * repositioned while it moves; under a page at rest the planes are not drawn at all.
+ */
+private fun Modifier.recede(shell: Shell, amount: () -> Float) = drawWithContent {
     val p = amount().coerceIn(0f, 1f)
-    if (p == 0f || shell.calm) return@graphicsLayer
-    scaleX = 1f - 0.06f * p
-    scaleY = scaleX
-    shape = Moving
-    clip = true
-}.drawWithContent {
-    drawContent()
-    val p = amount().coerceIn(0f, 1f)
+    if (shell.page.open && shell.page.progress.value >= 1f) return@drawWithContent
+    if (p == 0f || shell.calm) {
+        drawContent()
+    } else {
+        val s = 1f - 0.06f * p
+        scale(s) {
+            val r = Moving.topStart.toPx(size, this)
+            clipPath(Path().apply { addRoundRect(RoundRect(Rect(Offset.Zero, size), CornerRadius(r))) }) { this@drawWithContent.drawContent() }
+        }
+    }
     if (p > 0f) drawRect(Color.Black, alpha = 0.4f * p)
+}.graphicsLayer {
+    compositingStrategy = if (amount() > 0f && amount() < 1f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
 }
 
-/**
- * A page (Z2). Opened with the bounds of the element that asked for it, it grows out of that
- * element as one opaque container: position, size and corner on one spring, the page's own
- * content fading in once the box is big enough to hold it, all in the layer so nothing is laid
- * out again. Without bounds it falls back to the shared-bounds morph of its MorphSource.
- */
-@OptIn(ExperimentalAnimationApi::class, ExperimentalSharedTransitionApi::class)
+/** A page (Z2): it grows out of the element that opened it and fills the screen. */
 @Composable
-private fun PageHost(surface: Surface, title: String, content: @Composable (AnimatedVisibilityScope, ScrollState) -> Unit) {
+private fun PageHost(surface: Surface, title: String, content: @Composable (ScrollState) -> Unit) {
     val shell = LocalShell.current
-    val calm = shell.calm
     val reach = with(LocalDensity.current) { 64.dp.toPx() }
-    val open = shell.pageTransition.animateFloat({ Motion.morph() }, "open-${surface.name}") { if (it == surface) 1f else 0f }
-    shell.pageTransition.AnimatedVisibility({ it == surface }, enter = EnterTransition.None, exit = ExitTransition.None) {
-        val page = this
-        val from = shell.pageFrom
-        val shared = from == null && !calm
-        val frame = if (shared) Modifier.morph(shell.pageOrigin, page, RectangleShape) else Modifier.grow(from ?: Rect.Zero, shell.pageCorner, calm) { open.value }
-        Box(
-            Modifier.fillMaxSize().then(frame).background(Tone.App)
-                .then(if (shared) Modifier.morphBody() else Modifier)
-                .pointerInput(Unit) { detectTapGestures { } },
-        ) {
-            Box(
-                Modifier.fillMaxSize().graphicsLayer {
-                    if (shared || calm) return@graphicsLayer
-                    alpha = ((open.value - 0.18f) / 0.42f).coerceIn(0f, 1f)
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                },
+    Presented(shell.page, Modifier.fillMaxSize(), 0.dp, Tone.App, only = surface, zoom = true) {
+        Box(Modifier.fillMaxSize().background(Tone.App)) {
+            val haze = remember { HazeState() }
+            val scroll = rememberScrollState()
+            val titled by remember { derivedStateOf { scroll.value > reach } }
+            Box(Modifier.fillMaxSize().glassSource(haze)) { content(scroll) }
+            IconBtn(Glyph.Left, { shell.close(surface) }, Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), tint = Ink.One, size = 44.dp, glass = haze)
+            AnimatedVisibility(
+                titled,
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(vertical = 8.dp),
+                enter = fadeIn(tween(Motion.M1)),
+                exit = fadeOut(tween(Motion.M1)),
             ) {
-                val haze = remember { HazeState() }
-                val scroll = rememberScrollState()
-                val titled by remember { derivedStateOf { scroll.value > reach } }
-                Box(Modifier.fillMaxSize().glassSource(haze)) { content(page, scroll) }
-                Box(Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).size(44.dp).glass(haze, CircleShape)) {
-                    IconBtn(Glyph.Left, { shell.close(surface) }, tint = Ink.One, fill = Color.Transparent, size = 44.dp, island = true)
-                }
-                AnimatedVisibility(
-                    titled,
-                    Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(vertical = 8.dp),
-                    enter = fadeIn(tween(Motion.M1)),
-                    exit = fadeOut(tween(Motion.M1)),
-                ) {
-                    Box(Modifier.height(44.dp).glass(haze, Chrome.Capsule).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
-                        BasicText(title, style = Type.Section)
-                    }
+                Box(Modifier.height(44.dp).glass(haze, Chrome.Capsule).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+                    BasicText(title, style = Type.Section)
                 }
             }
         }
     }
 }
 
-/** The page's visible window while it flies: a rounded box that travels from [from] to the whole screen. */
-private data class Window(val height: Float, val radius: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Rounded(RoundRect(0f, 0f, size.width, height.coerceAtMost(size.height), CornerRadius(radius)))
-}
-
-private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
-
 /**
- * The container transform in one layer. The page keeps its full size and is scaled to the box's
- * width; the box starts where the receding plane has carried the source, so the two stay on top
- * of each other the whole way, and the corner rounds into a sheet before squaring into the screen.
+ * Back follows the thumb on the drawer. Pages and sheets answer back themselves; with nothing
+ * open it is left to the system, so the back-to-home preview runs.
  */
-private fun Modifier.grow(from: Rect, corner: Float, calm: Boolean, progress: () -> Float) = graphicsLayer {
-    val t = progress().coerceIn(0f, 1f)
-    if (calm) {
-        alpha = t
-        return@graphicsLayer
-    }
-    if (t >= 1f) return@graphicsLayer
-    val w = size.width
-    val h = size.height
-    val k = 1f - 0.06f * t
-    val l = lerp(w / 2 + (from.left - w / 2) * k, 0f, t)
-    val top = lerp(h / 2 + (from.top - h / 2) * k, 0f, t)
-    val r = lerp(w / 2 + (from.right - w / 2) * k, w, t)
-    val b = lerp(h / 2 + (from.bottom - h / 2) * k, h, t)
-    val s = ((r - l) / w).coerceAtLeast(0.01f)
-    val sheet = Radius.Sheet.toPx()
-    val round = (if (t < 0.5f) lerp(corner, sheet, t * 2) else sheet * (1f - t) * 2).coerceAtMost(minOf(r - l, b - top) / 2)
-    transformOrigin = TransformOrigin(0f, 0f)
-    scaleX = s
-    scaleY = s
-    translationX = l
-    translationY = top
-    shape = Window((b - top) / s, round / s)
-    clip = true
-    shadowElevation = 16.dp.toPx() * 4f * t * (1f - t)
-    alpha = (t / 0.08f).coerceIn(0f, 1f)
-    compositingStrategy = CompositingStrategy.ModulateAlpha
-}
-
-/**
- * Back follows the thumb: it closes the drawer, a page or a sheet, whichever is in front. With
- * nothing open it is left to the system, so the back-to-home preview runs.
- */
-@OptIn(ExperimentalTransitionApi::class)
 @Composable
 private fun Backs(shell: Shell) {
     val scope = rememberCoroutineScope()
     val drawer = shell.drawer
     val open by remember { derivedStateOf { drawer.targetValue >= 1f || drawer.targetValue <= -1f } }
-    val bare = shell.pages.currentState == null && shell.sheets.currentState == null
 
-    PredictiveBackHandler(open && bare && !(shell.docked && drawer.targetValue > 0f)) { progress ->
+    PredictiveBackHandler(open && shell.bare && !(shell.docked && drawer.targetValue > 0f)) { progress ->
         val from = drawer.targetValue
         try {
             progress.collect { e -> if (!shell.calm) drawer.snapTo(from * (1f - e.progress)) }
             scope.launch { drawer.animateTo(if (shell.docked) 1f else 0f, Motion.drawer()) }
         } catch (e: CancellationException) {
             scope.launch { drawer.animateTo(from, Motion.drawer()) }
-            throw e
-        }
-    }
-    PredictiveBackHandler(shell.pages.currentState != null && shell.sheets.currentState == null) { progress ->
-        try {
-            progress.collect { e -> shell.pages.seekTo(e.progress, targetState = null) }
-            scope.launch { shell.pages.animateTo(null) }
-        } catch (e: CancellationException) {
-            scope.launch { shell.pages.animateTo(shell.pages.currentState) }
-            throw e
-        }
-    }
-    PredictiveBackHandler(shell.sheets.currentState != null) { progress ->
-        try {
-            progress.collect { e -> shell.sheets.seekTo(e.progress, targetState = null) }
-            scope.launch { shell.sheets.animateTo(null) }
-        } catch (e: CancellationException) {
-            scope.launch { shell.sheets.animateTo(shell.sheets.currentState) }
             throw e
         }
     }

@@ -162,6 +162,9 @@ object Motion {
     fun <T> drawer() = spring<T>(dampingRatio = 0.92f, stiffness = 420f)
     fun <T> morph() = spring<T>(dampingRatio = 0.9f, stiffness = 380f)
 
+    /** Surfaces growing out of what opened them: a touch of overshoot, so they land instead of stopping. */
+    fun <T> island() = spring<T>(dampingRatio = 0.82f, stiffness = 340f)
+
     /** Moving text never overshoots. */
     fun <T> calmText() = spring<T>(dampingRatio = 1f, stiffness = 600f)
 }

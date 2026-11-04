@@ -216,7 +216,10 @@ private fun Camera(onSpot: (Spot?) -> Unit, onCode: (String) -> Unit, paused: Bo
             val future = ProcessCameraProvider.getInstance(c)
             future.addListener({
                 if (bound.gone) return@addListener
-                val provider = future.get().also { bound.provider = it }
+                val provider = runCatching { future.get() }.getOrNull()?.also { bound.provider = it } ?: return@addListener
+                // Tablets and Chromebooks may have only a front camera, or none: the address field still works.
+                val lens = listOf(CameraSelector.DEFAULT_BACK_CAMERA, CameraSelector.DEFAULT_FRONT_CAMERA)
+                    .firstOrNull { runCatching { provider.hasCamera(it) }.getOrDefault(false) } ?: return@addListener
                 val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                 val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
                 analysis.setAnalyzer(worker) { img ->
@@ -240,8 +243,10 @@ private fun Camera(onSpot: (Spot?) -> Unit, onCode: (String) -> Unit, paused: Bo
                     }
                     img.close()
                 }
-                provider.unbindAll()
-                provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                runCatching {
+                    provider.unbindAll()
+                    provider.bindToLifecycle(owner, lens, preview, analysis)
+                }
             }, main)
             view
         },

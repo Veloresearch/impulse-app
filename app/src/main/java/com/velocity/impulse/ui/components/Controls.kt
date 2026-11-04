@@ -1,6 +1,7 @@
 package com.velocity.impulse.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -114,7 +115,8 @@ fun Btn(
 
 /**
  * A round button. Below 48dp the drawn circle keeps [size] while the touch area and what TalkBack
- * focuses grow to 48dp around it, without taking more room in the layout.
+ * focuses grow to 48dp around it, without taking more room in the layout. With [glass] it is a
+ * floating island of its own, and the whole glass circle stretches under the finger.
  */
 @Composable
 fun IconBtn(
@@ -128,17 +130,24 @@ fun IconBtn(
     island: Boolean = false,
     liquid: Float = 1f,
     description: String = icon.spoken(),
+    glass: HazeState? = null,
 ) {
+    val rest = if (glass != null) Color.Transparent else fill
     Box(
         modifier.size(size).requiredSize(maxOf(size, Reach))
             .semantics { contentDescription = description }
             .pressable(
-                onClick, Dot(size), fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press,
-                depth = 0.88f, enabled = enabled, stretch = true, liquid = liquid, feelOnDown = island,
+                onClick, Dot(size), rest, if (rest == Color.Transparent) Tone.Raise else Tone.Press,
+                depth = if (glass != null) 1f else 0.88f, enabled = enabled, stretch = true, liquid = liquid,
+                feelOnDown = island || glass != null,
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, tint, size = size * 0.48f)
+        if (glass != null) {
+            Box(Modifier.size(size).glass(glass, CircleShape), contentAlignment = Alignment.Center) { Icon(icon, tint, size = size * 0.48f) }
+        } else {
+            Icon(icon, tint, size = size * 0.48f)
+        }
     }
 }
 

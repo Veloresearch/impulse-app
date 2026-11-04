@@ -763,9 +763,7 @@ private fun Voice(m: AppModel) {
             horizontalArrangement = Arrangement.spacedBy(32.dp),
         ) {
             MuteButton(talk.muted, mute::value, haze, talk::toggleMute)
-            Box(Modifier.size(64.dp).glass(haze, CircleShape)) {
-                IconBtn(Glyph.Close, VoiceState::close, tint = Ink.One, fill = Color.Transparent, size = 64.dp, island = true)
-            }
+            IconBtn(Glyph.Close, VoiceState::close, tint = Ink.One, size = 64.dp, glass = haze)
         }
     }
 }
@@ -801,10 +799,11 @@ private fun tail(s: String) = if (s.length > 180) "…" + s.takeLast(180).substr
 @Composable
 private fun MuteButton(muted: Boolean, k: () -> Float, haze: HazeState, onClick: () -> Unit) {
     val ink = if (muted) Tone.App else Ink.One
-    Box(Modifier.size(64.dp).glass(haze, CircleShape)) {
+    Box(Modifier.size(64.dp)) {
         Box(
             Modifier.fillMaxSize()
-                .pressable(onClick, CircleShape, depth = 0.88f, stretch = true, feel = if (muted) Feel.On else Feel.Off, feelOnDown = true)
+                .pressable(onClick, CircleShape, depth = 1f, stretch = true, feel = if (muted) Feel.On else Feel.Off, feelOnDown = true)
+                .glass(haze, CircleShape)
                 .drawBehind { drawCircle(Ink.One, alpha = k()) },
             contentAlignment = Alignment.Center,
         ) {

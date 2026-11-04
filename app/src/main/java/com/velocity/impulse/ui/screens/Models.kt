@@ -1,11 +1,7 @@
 package com.velocity.impulse.ui.screens
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -21,10 +17,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -35,7 +29,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,6 +49,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -71,7 +65,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -79,7 +72,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Impulse
@@ -97,6 +89,9 @@ import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.ModelFace
 import com.velocity.impulse.ui.components.OnAccent
+import com.velocity.impulse.ui.components.LocalPresentation
+import com.velocity.impulse.ui.components.Presentation
+import com.velocity.impulse.ui.components.Presented
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
 import com.velocity.impulse.ui.components.Sheet
@@ -104,13 +99,13 @@ import com.velocity.impulse.ui.components.Toggle
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
-import com.velocity.impulse.ui.components.morph
-import com.velocity.impulse.ui.components.morphBody
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
+import com.velocity.impulse.ui.theme.Radius
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Space
@@ -124,9 +119,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** A model's details and where they grew from, so they can shrink back into it. */
-private data class Opened(val origin: String, val probe: Probe)
-
 private const val LoadedOrigin = "models:loaded"
 
 /** The library on the computer and the models that can be fetched for it. */
@@ -134,26 +126,21 @@ private const val LoadedOrigin = "models:loaded"
 fun ModelsPage(m: AppModel) {
     val hub = remember { HubState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var opened by remember { mutableStateOf<Opened?>(null) }
-    var showing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val card = remember { Presentation<Probe>(scope) }
     var hw by remember { mutableStateOf<JSONObject?>(null) }
     val calm = LocalReduceMotion.current
     LaunchedEffect(Unit) { m.ask({ hardware() }) { hw = it } }
     WatchDownloads(m, hub)
-    val out = opened?.origin?.takeIf { showing }
-    val open: (String, Probe) -> Unit = { origin, p ->
-        opened = Opened(origin, p)
-        showing = true
-    }
 
     PageFrame(
         tr("Models", "Modele"),
         overlay = {
-            ModelCard(m, opened, showing, hw) { showing = false }
+            ModelCard(m, card, hw)
             HubSheets(m, hub)
         },
     ) {
-        LoadedCard(m, out == LoadedOrigin, Modifier.rise(0)) { p -> open(LoadedOrigin, p) }
+        LoadedCard(m, card, Modifier.rise(0))
         Segmented(
             listOf(tr("On the computer", "Na komputerze"), tr("Find models", "Znajdź modele")),
             tab,
@@ -172,7 +159,7 @@ fun ModelsPage(m: AppModel) {
             label = "tab",
         ) { t ->
             Column(verticalArrangement = Arrangement.spacedBy(Space.S4)) {
-                if (t == 0) Library(m, hub, out, { tab = 1 }, open)
+                if (t == 0) Library(m, hub, card) { tab = 1 }
                 else HubBody(m, hub)
             }
         }
@@ -182,7 +169,7 @@ fun ModelsPage(m: AppModel) {
 /** What is loaded, or loading, as the page's first island; Unload sits on it and its details grow out of it. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LoadedCard(m: AppModel, out: Boolean, modifier: Modifier, onOpen: (Probe) -> Unit) {
+private fun LoadedCard(m: AppModel, card: Presentation<Probe>, modifier: Modifier) {
     val l = m.status?.model
     val loading = m.loading
     val calm = LocalReduceMotion.current
@@ -208,89 +195,71 @@ private fun LoadedCard(m: AppModel, out: Boolean, modifier: Modifier, onOpen: (P
         }
     }
     val p = l?.let { x -> m.library.firstOrNull { samePath(it.path, x.path) } }
-    Source(out, modifier) {
-        Column(
-            Modifier.morph(LoadedOrigin, this, Shapes.Card)
-                .fillMaxWidth()
-                .pressable({ p?.let(onOpen) }, Shapes.Card, Tone.Panel, if (p != null) Tone.Raise else Tone.Panel, depth = if (p != null) 0.985f else 1f, feel = if (p != null) Feel.Tap else null, tilt = if (p != null) 2f else 0f)
-                .padding(Space.S4),
-        ) {
-            AnimatedContent(
-                loading ?: l?.path,
-                Modifier.fillMaxWidth(),
-                transitionSpec = {
-                    val enter = if (calm) fadeIn(tween(Motion.M2))
-                    else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 } + scaleIn(Motion.calmText(), 0.97f)
-                    enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
-                },
-                label = "loaded",
-            ) { shown ->
-                val coming = loading != null && shown == loading
-                val name = if (coming) m.library.firstOrNull { samePath(it.path, shown) }?.name ?: shown.orEmpty().substringAfterLast('/').substringAfterLast('\\') else l?.name
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (name == null) {
-                            Box(Modifier.size(52.dp).background(Tone.Hover, Squircle(52.dp * 0.22f)), contentAlignment = Alignment.Center) {
-                                Icon(Glyph.Models, Ink.Three, size = 22.dp)
-                            }
-                        } else {
-                            ModelFace(m, name, if (coming) "" else l?.family.orEmpty(), 52.dp)
+    Column(
+        modifier.grows(card, LoadedOrigin, Shapes.Card)
+            .fillMaxWidth()
+            .pressable({ p?.let { card.open(it, LoadedOrigin) } }, Shapes.Card, Tone.Panel, if (p != null) Tone.Raise else Tone.Panel, depth = if (p != null) 0.985f else 1f, feel = if (p != null) Feel.Tap else null, tilt = if (p != null) 2f else 0f)
+            .padding(Space.S4),
+    ) {
+        AnimatedContent(
+            loading ?: l?.path,
+            Modifier.fillMaxWidth(),
+            transitionSpec = {
+                val enter = if (calm) fadeIn(tween(Motion.M2))
+                else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 } + scaleIn(Motion.calmText(), 0.97f)
+                enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
+            },
+            label = "loaded",
+        ) { shown ->
+            val coming = loading != null && shown == loading
+            val name = if (coming) m.library.firstOrNull { samePath(it.path, shown) }?.name ?: shown.orEmpty().substringAfterLast('/').substringAfterLast('\\') else l?.name
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (name == null) {
+                        Box(Modifier.size(52.dp).background(Tone.Hover, Squircle(52.dp * 0.22f)), contentAlignment = Alignment.Center) {
+                            Icon(Glyph.Models, Ink.Three, size = 22.dp)
                         }
-                        Spacer(Modifier.width(Space.S3))
-                        Column(Modifier.weight(1f)) {
-                            BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Section, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            BasicText(
-                                when {
-                                    coming -> tr("Loading on the computer", "Wczytuję na komputerze")
-                                    name == null -> tr("Pick one below to load it", "Wybierz poniżej, żeby go wczytać")
-                                    else -> p?.let(::modelLine) ?: tr("Ready", "Gotowy")
-                                },
-                                style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (coming || l != null) {
-                            Spacer(Modifier.width(Space.S2))
-                            LoadButton(loadState(coming, l != null), {}, { m.unload() }, enabled = loading == null, size = 40.dp)
-                        }
+                    } else {
+                        ModelFace(m, name, if (coming) "" else l?.family.orEmpty(), 52.dp)
                     }
-                    if (!coming && l != null) {
-                        Spacer(Modifier.height(Space.S3))
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Badge(tr("${tokens(l.context.toLong())} per chat", "${tokens(l.context.toLong())} na czat"))
-                            if (l.thinks) Badge(tr("Thinking", "Myślenie"), Glyph.Brain)
-                            if (l.vision) Badge(tr("Vision", "Obraz"), Glyph.Eye)
-                        }
+                    Spacer(Modifier.width(Space.S3))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Section, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        BasicText(
+                            when {
+                                coming -> tr("Loading on the computer", "Wczytuję na komputerze")
+                                name == null -> tr("Pick one below to load it", "Wybierz poniżej, żeby go wczytać")
+                                else -> p?.let(::modelLine) ?: tr("Ready", "Gotowy")
+                            },
+                            style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (coming || l != null) {
+                        Spacer(Modifier.width(Space.S2))
+                        LoadButton(loadState(coming, l != null), {}, { m.unload() }, enabled = loading == null, size = 40.dp)
+                    }
+                }
+                if (!coming && l != null) {
+                    Spacer(Modifier.height(Space.S3))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Badge(tr("${tokens(l.context.toLong())} per chat", "${tokens(l.context.toLong())} na czat"))
+                        if (l.thinks) Badge(tr("Thinking", "Myślenie"), Glyph.Brain)
+                        if (l.vision) Badge(tr("Vision", "Obraz"), Glyph.Eye)
                     }
                 }
             }
-            AnimatedVisibility(loading != null && secs > 0, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
-                Roll(tr("$secs s", "$secs s"), Type.Meta, Modifier.padding(top = Space.S2), digits = true)
-            }
-            Reveal(failed != null) {
-                BasicText(failed.orEmpty(), Modifier.padding(top = Space.S3), style = Type.Meta.copy(color = Signal.Err))
-            }
         }
-    }
-}
-
-/**
- * Wraps what a model's details grow out of. It hides while it "is" the card and comes back as the
- * card shrinks into it; its space is held meanwhile so the list never closes up.
- */
-@Composable
-private fun Source(out: Boolean, modifier: Modifier = Modifier, content: @Composable AnimatedVisibilityScope.() -> Unit) {
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    val d = LocalDensity.current
-    val calm = LocalReduceMotion.current
-    Box(modifier.fillMaxWidth().defaultMinSize(with(d) { size.width.toDp() }, with(d) { size.height.toDp() })) {
-        AnimatedVisibility(!out || calm, enter = EnterTransition.None, exit = ExitTransition.None) {
-            Box(Modifier.onSizeChanged { size = it }) { content() }
+        AnimatedVisibility(loading != null && secs > 0, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
+            Roll(tr("$secs s", "$secs s"), Type.Meta, Modifier.padding(top = Space.S2), digits = true)
+        }
+        Reveal(failed != null) {
+            BasicText(failed.orEmpty(), Modifier.padding(top = Space.S3), style = Type.Meta.copy(color = Signal.Err))
         }
     }
 }
 
 @Composable
-private fun Library(m: AppModel, hub: HubState, out: String?, onDownloads: () -> Unit, onOpen: (String, Probe) -> Unit) {
+private fun Library(m: AppModel, hub: HubState, card: Presentation<Probe>, onDownloads: () -> Unit) {
     Arriving(hub, onDownloads)
     if (m.library.isEmpty()) {
         Empty(
@@ -317,9 +286,7 @@ private fun Library(m: AppModel, hub: HubState, out: String?, onDownloads: () ->
                 rows.forEach { p ->
                     key(p.path) {
                         val origin = "models:${p.path}"
-                        Source(out == origin) {
-                            Box(Modifier.morph(origin, this, RectangleShape)) { ModelRow(m, p) { onOpen(origin, p) } }
-                        }
+                        Box(Modifier.grows(card, origin, RectangleShape)) { ModelRow(m, p) { card.open(p, origin) } }
                     }
                 }
             }
@@ -385,33 +352,22 @@ private fun fitOf(plan: Plan, layers: Int, gpu: Boolean): Fit {
 
 /** The details card: it grows out of the row or card it was opened from and shrinks back into it. */
 @Composable
-private fun BoxScope.ModelCard(m: AppModel, opened: Opened?, showing: Boolean, hw: JSONObject?, onClose: () -> Unit) {
-    val calm = LocalReduceMotion.current
+private fun BoxScope.ModelCard(m: AppModel, card: Presentation<Probe>, hw: JSONObject?) {
     val tall = LocalConfiguration.current.screenHeightDp.dp * 0.88f
-    BackHandler(showing, onClose)
-    AnimatedVisibility(showing, Modifier.matchParentSize(), enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M2))) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable(remember { MutableInteractionSource() }, null) { onClose() })
-    }
-    AnimatedVisibility(
-        showing && opened != null,
-        Modifier.align(Alignment.BottomCenter),
-        enter = if (calm) fadeIn(tween(Motion.M2)) else EnterTransition.None,
-        exit = if (calm) fadeOut(tween(Motion.M2)) else ExitTransition.None,
-    ) {
-        val o = opened ?: return@AnimatedVisibility
+    Presented(
+        card,
+        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(Space.S2).fillMaxWidth().heightIn(max = tall),
+        Radius.Sheet,
+        Tone.Float,
+        scrim = 0.45f,
+    ) { p ->
         Column(
-            Modifier.navigationBarsPadding()
-                .padding(Space.S2)
-                .morph(o.origin, this, Shapes.Sheet)
-                .background(Tone.Float, Shapes.Sheet)
-                .fillMaxWidth()
-                .heightIn(max = tall)
-                .morphBody()
+            Modifier.background(Tone.Float, Shapes.Sheet)
                 .verticalScroll(rememberScrollState())
                 .padding(Space.S4),
             verticalArrangement = Arrangement.spacedBy(Space.S4),
         ) {
-            key(o.probe.path) { ModelDetails(m, o.probe, hw, onClose) }
+            key(p.path) { ModelDetails(m, p, hw, card::close) }
         }
     }
 }
@@ -774,9 +730,10 @@ internal fun <T> AppModel.ask(block: suspend Impulse.() -> T, fail: (String) -> 
         r.fold(done) { e -> fail(e.message?.takeIf { it.isNotBlank() } ?: tr("The computer did not answer.", "Komputer nie odpowiedział.")) }
     }
 
-/** Blocks rise in one after another on a spring with no overshoot, so text never bounces. */
+/** Blocks rise in one after another on a spring with no overshoot, so text never bounces; a grown surface brings them in itself. */
 @Composable
 internal fun Modifier.rise(order: Int): Modifier {
+    if (LocalPresentation.current != null) return this
     val calm = LocalReduceMotion.current
     val lift = with(LocalDensity.current) { 24.dp.toPx() }
     val p = remember { Animatable(if (calm) 1f else 0f) }

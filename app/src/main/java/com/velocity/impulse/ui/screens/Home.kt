@@ -32,9 +32,8 @@ import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Glyph
-import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.Variant
-import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.Motion
@@ -142,26 +141,22 @@ internal fun Greeting(m: AppModel, modifier: Modifier = Modifier) {
                         }
                         Standing.None -> {
                             BasicText(tr("Pick a model to start.", "Wybierz model, żeby zacząć."), style = note)
-                            MorphSource("greeting-model", Surface.Model, button) {
-                                Btn(
-                                    tr("Choose a model", "Wybierz model"),
-                                    { shell.open(Surface.Model, "greeting-model") },
-                                    Modifier.morph("greeting-model", this, Shapes.Card),
-                                    Variant.Primary,
-                                    Glyph.Models,
-                                )
-                            }
+                            Btn(
+                                tr("Choose a model", "Wybierz model"),
+                                { shell.open(Surface.Model, "greeting-model") },
+                                button.grows(shell.sheet, "greeting-model", Shapes.Card),
+                                Variant.Primary,
+                                Glyph.Models,
+                            )
                         }
                         Standing.Offline -> {
                             BasicText(tr("Your computer can't be reached right now.", "Nie ma teraz połączenia z Twoim komputerem."), style = note)
-                            MorphSource("greeting-computer", Surface.Computer, button) {
-                                Btn(
-                                    tr("Check connection", "Sprawdź połączenie"),
-                                    { shell.open(Surface.Computer, "greeting-computer") },
-                                    Modifier.morph("greeting-computer", this, Shapes.Card),
-                                    Variant.Standard,
-                                )
-                            }
+                            Btn(
+                                tr("Check connection", "Sprawdź połączenie"),
+                                { shell.open(Surface.Computer, "greeting-computer") },
+                                button.grows(shell.page, "greeting-computer", Shapes.Card),
+                                Variant.Standard,
+                            )
                         }
                     }
                 }

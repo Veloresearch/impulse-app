@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -180,7 +181,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     val chat: Chat? get() = current?.let(::find)
     val link: Link? get() = server?.let { Link.of(it.base) }
-    private fun api() = Impulse(server!!, token)
+    private fun api() = Impulse(server ?: throw ImpulseError(Lang.tr("Not connected.", "Brak połączenia.")), token)
 
     /** The open side panel, restored on a cold start. */
     var panel by mutableStateOf(prefs.getString("panel", null))
@@ -236,6 +237,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             throw e as? ImpulseError ?: ImpulseError(Lang.tr("That does not look like an address.", "To nie wygląda na adres."))
         }
         val found = Impulse(s).profiles()
+        if (s.base != server?.base) {
+            // Another computer: its profiles share ids with this one's, so the chats must not carry over.
+            pause()
+            me = null
+            prefs.edit().remove("me").apply()
+        }
         server = s
         connectLink = null
         val e = prefs.edit().putString("server", s.base).putString("access_id", s.accessId)
@@ -269,6 +276,14 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun forgetServer() {
+        viewModelScope.launch {
+            // Changes made here that the computer has not taken yet go to it first.
+            withTimeoutOrNull(5000) { sync() }
+            forgetNow()
+        }
+    }
+
+    private fun forgetNow() {
         signOut()
         server = null
         me = null
@@ -281,6 +296,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         answers.values.forEach { it.cancel() }
         cache.forget()
         chats = emptyList()
+        persist()
         scratch = null
         go(null)
         drafts.clear()
@@ -402,9 +418,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             val a = api()
             val out = JSONArray()
             val holding = lives.keys.toSet()
+            val sent = HashMap<String, Chat>()
             for (id in cache.dirty.toList()) {
                 if (id in holding) continue
                 val c = chats.firstOrNull { it.id == id } ?: continue
+                sent[id] = c
                 out.put(JSONObject().put("id", id).put("base", cache.revs[id] ?: 0).put("session", c.raw))
             }
             for (id in cache.gone) out.put(JSONObject().put("id", id).put("deleted", true).put("base", cache.revs[id] ?: 0))
@@ -414,13 +432,26 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 for (rec in r.optJSONArray("chats").objects()) {
                     val id = rec.optString("id")
                     cache.revs[id] = rec.optLong("rev")
-                    cache.dirty -= id
-                    cache.gone -= id
-                    rec.optJSONObject("session")?.let { s -> next = next.map { if (it.id == id) Chat(s) else it } }
+                    // A chat changed or deleted while the push was out stays owed to the computer.
+                    if (sent[id] != null && sent[id] === chats.firstOrNull { it.id == id }) cache.dirty -= id
+                    if (rec.optBoolean("deleted")) {
+                        cache.gone -= id
+                        cache.dirty -= id
+                        if (id !in lives) next = next.filterNot { it.id == id }
+                    } else if (id !in cache.dirty && id !in lives) {
+                        rec.optJSONObject("session")?.let { s -> next = next.map { if (it.id == id) Chat(s) else it } }
+                    }
                 }
                 chats = next
+                if (current != null && current !in lives && next.none { it.id == current } && scratch?.id != current) go(null)
             }
-            val p = a.pull(cache.head)
+            var p = a.pull(cache.head)
+            if (p.optLong("head", cache.head) < cache.head) {
+                // The computer's chat store was reset or replaced: start counting again from zero.
+                cache.head = 0
+                cache.revs.clear()
+                p = a.pull(0)
+            }
             var next = chats
             for (rec in p.optJSONArray("chats").objects()) {
                 val id = rec.optString("id")
@@ -428,7 +459,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 if (rec.optBoolean("deleted")) {
                     next = next.filterNot { it.id == id }
                     if (current == id && id !in lives) go(null)
-                } else if (id !in cache.dirty && id !in lives) {
+                } else if (id !in cache.dirty && id !in cache.gone && id !in lives) {
                     val s = rec.optJSONObject("session") ?: continue
                     next = next.filterNot { it.id == id } + Chat(s)
                 }
@@ -442,9 +473,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** One writer at a time, in order, so an older snapshot never lands after a newer one. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val disk = Dispatchers.IO.limitedParallelism(1)
+
     private fun persist() {
-        val snapshot = chats
-        viewModelScope.launch(Dispatchers.IO) { synchronized(cache) { cache.save(snapshot) } }
+        val write = cache.snapshot(chats)
+        viewModelScope.launch(disk) { write() }
     }
 
     private fun find(id: String): Chat? = scratch?.takeIf { it.id == id } ?: chats.firstOrNull { it.id == id }
@@ -632,9 +667,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun takeShortcut(): String? = shortcut.also { shortcut = null }
 
-    /** An `impulse://connect` link: followed at once while pairing, otherwise kept in [connectLink] for the owner to confirm. */
+    /** An `impulse://connect` link, kept in [connectLink] until the owner confirms it: any web page can open one. */
     fun openLink(raw: String) {
-        if (stage == Stage.Connect) connect(raw) else connectLink = raw
+        connectLink = raw
     }
 
     fun dropConnectLink() {
@@ -663,8 +698,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         go(null)
         viewModelScope.launch {
             syncing.withLock {
-                synchronized(cache) { cache.forget() }
+                cache.forget()
                 chats = emptyList()
+                persist()
             }
             sync()
         }
@@ -730,7 +766,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         anchors.remove(id)
         persist()
         pushSoon()
-        gone?.let { c -> viewModelScope.launch(Dispatchers.IO) { media.drop(c.messages.map { it.id }) } }
+        // A duplicate shares its messages' ids, and so their pictures and files, with the original.
+        val kept = chats.flatMapTo(HashSet()) { c -> c.messages.map { it.id } }
+        gone?.let { c -> viewModelScope.launch(Dispatchers.IO) { media.drop(c.messages.map { it.id }.filterNot(kept::contains)) } }
     }
 
     /** The chat's personality: null follows the one in the answer settings, "off" is none. */

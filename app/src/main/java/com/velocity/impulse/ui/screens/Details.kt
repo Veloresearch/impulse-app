@@ -105,13 +105,12 @@ import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.ModelFace
-import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
 import com.velocity.impulse.ui.components.Toggle
 import com.velocity.impulse.ui.components.feel
-import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -173,7 +172,7 @@ fun Details(m: AppModel, modifier: Modifier = Modifier) {
         Header(m, c, facts, shell, Modifier.arrive(shell, 0))
         if (c != null && facts != null) {
             facts.receipt?.let { r -> Section(shell, 1, tr("Last answer", "Ostatnia odpowiedź")) { Group { Stats(r) } } }
-            Section(shell, 2, tr("Memory", "Pamięć")) { Memory(m, c, facts) }
+            Section(shell, 2, "Momentum") { Memory(m, c, facts) }
             if (facts.files.isNotEmpty()) Section(shell, 3, tr("In this chat", "W tym czacie")) { Gallery(facts.files) }
             Section(shell, 4, tr("Chat settings", "Ustawienia czatu")) { ChatSettings(m, c) }
             Section(shell, 5, tr("Personality", "Osobowość")) { Voices(c.persona, m.style.persona) { m.setPersona(it) } }
@@ -197,7 +196,7 @@ private fun Header(m: AppModel, c: Chat?, facts: Facts?, shell: Shell, modifier:
         if (c != null && facts != null) {
             Spacer(Modifier.size(4.dp))
             BasicText(
-                tr("${facts.asked} questions · started ", "pytania: ${facts.asked} · od ") + whenLabel(c.raw.optLong("createdAt")),
+                tr(if (facts.asked == 1) "1 question · started " else "${facts.asked} questions · started ", "pytania: ${facts.asked} · od ") + whenLabel(c.raw.optLong("createdAt")),
                 style = Type.Meta.copy(color = Ink.Three),
             )
         }
@@ -359,7 +358,7 @@ private fun Memory(m: AppModel, c: Chat, facts: Facts) {
         Block {
             if (c.temporary) {
                 BasicText(tr("Nothing is kept", "Nic nie jest zachowywane"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium))
-                BasicText(tr("Temporary chats leave nothing in memory.", "Czaty tymczasowe nie zostawiają nic w pamięci."), style = Type.Meta.copy(color = Ink.Three))
+                BasicText(tr("Temporary chats leave nothing in Momentum.", "Czaty tymczasowe nie zostawiają nic w Momentum."), style = Type.Meta.copy(color = Ink.Three))
                 return@Block
             }
             AnimatedContent(
@@ -399,6 +398,17 @@ private fun Memory(m: AppModel, c: Chat, facts: Facts) {
                             style = Type.Meta.copy(color = Ink.Three),
                         )
                     }
+                    val recalled = facts.receipt?.optLong("selected_tokens") ?: 0L
+                    if (recalled > 0) {
+                        val store = facts.receipt?.optString("store").orEmpty()
+                        val own = store.isBlank() || store.startsWith("chat-") || store.startsWith("chat:")
+                        Spacer(Modifier.size(Space.S2))
+                        BasicText(
+                            if (own) tr("The last answer recalled ${short(recalled)} tokens from this chat's memory.", "Ostatnia odpowiedź przywołała ${short(recalled)} tokenów z pamięci czatu.")
+                            else tr("The last answer recalled ${short(recalled)} tokens from the context “$store”.", "Ostatnia odpowiedź przywołała ${short(recalled)} tokenów z kontekstu „$store”."),
+                            style = Type.Meta.copy(color = Ink.Two),
+                        )
+                    }
                 } else Column {
                     BasicText(tr("Forget what this chat kept?", "Zapomnieć, co zachował ten czat?"), style = Type.Section.copy(color = Ink.One))
                     Spacer(Modifier.size(Space.S1))
@@ -435,7 +445,7 @@ private fun Memory(m: AppModel, c: Chat, facts: Facts) {
             )
             Spacer(Modifier.size(Space.S2))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.S3)) {
-                Legend(accent, tr("Memory", "Pamięć"), meter.memory)
+                Legend(accent, "Momentum", meter.memory)
                 Legend(conversation, tr("Chat", "Czat"), meter.conversation)
                 Legend(reply, tr("Reply", "Odpowiedź"), meter.reply)
             }
@@ -717,26 +727,24 @@ private fun Creativity(value: Double?, onSet: (Double?) -> Unit) {
 private fun ModelRow(m: AppModel, shell: Shell) {
     val accent = LocalAccent.current
     val name = m.status?.model?.name
-    MorphSource("details-model", Surface.Model, Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.morph("details-model", this, RectangleShape)
-                .fillMaxWidth().heightIn(min = 64.dp)
-                .pressable({ shell.open(Surface.Model, "details-model") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
-                .padding(horizontal = Space.S4),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (name != null) ModelFace(m, name, m.status?.model?.family.orEmpty(), 36.dp)
-            else Box(Modifier.size(36.dp).background(Tone.Raise, CircleShape), contentAlignment = Alignment.Center) { Icon(Glyph.Models, Ink.Three, size = 18.dp) }
-            Spacer(Modifier.width(Space.S3))
-            Column(Modifier.weight(1f)) {
-                BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                BasicText(
-                    m.status?.model?.context?.let { tr("Window ${short(it.toLong())} tokens", "Okno ${short(it.toLong())} tokenów") } ?: tr("Choose one", "Wybierz"),
-                    style = Type.Meta.copy(color = if (name == null) accent else Ink.Three),
-                )
-            }
-            Icon(Glyph.Right, Ink.Four, size = 16.dp)
+    Row(
+        Modifier.grows(shell.sheet, "details-model", RectangleShape)
+            .fillMaxWidth().heightIn(min = 64.dp)
+            .pressable({ shell.open(Surface.Model, "details-model") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
+            .padding(horizontal = Space.S4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (name != null) ModelFace(m, name, m.status?.model?.family.orEmpty(), 36.dp)
+        else Box(Modifier.size(36.dp).background(Tone.Raise, CircleShape), contentAlignment = Alignment.Center) { Icon(Glyph.Models, Ink.Three, size = 18.dp) }
+        Spacer(Modifier.width(Space.S3))
+        Column(Modifier.weight(1f)) {
+            BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(
+                m.status?.model?.context?.let { tr("Window ${short(it.toLong())} tokens", "Okno ${short(it.toLong())} tokenów") } ?: tr("Choose one", "Wybierz"),
+                style = Type.Meta.copy(color = if (name == null) accent else Ink.Three),
+            )
         }
+        Icon(Glyph.Right, Ink.Four, size = 16.dp)
     }
 }
 
@@ -746,28 +754,26 @@ private fun ContextRow(m: AppModel, shell: Shell) {
     val accent = LocalAccent.current
     val chosen = m.chat.let { c -> if (c == null) m.defaultContext else c.contextName?.takeIf { !it.startsWith("chat-") } }
     val info = m.contexts.firstOrNull { it.name == chosen }
-    MorphSource("details-context", Surface.Context, Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.morph("details-context", this, RectangleShape)
-                .fillMaxWidth().heightIn(min = 64.dp)
-                .pressable({ shell.open(Surface.Context, "details-context") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
-                .padding(horizontal = Space.S4),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(36.dp).background(if (chosen != null) accent.copy(alpha = 0.16f) else Tone.Raise, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Glyph.Contexts, if (chosen != null) accent else Ink.Three, size = 18.dp)
-            }
-            Spacer(Modifier.width(Space.S3))
-            Column(Modifier.weight(1f)) {
-                BasicText(chosen ?: tr("No context", "Bez kontekstu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                BasicText(
-                    if (chosen == null) tr("Answers from the chat alone", "Odpowiedzi tylko z czatu")
-                    else info?.tokens?.let { tokens(it) } ?: tr("Change", "Zmień"),
-                    style = Type.Meta.copy(color = Ink.Three),
-                )
-            }
-            Icon(Glyph.Right, Ink.Four, size = 16.dp)
+    Row(
+        Modifier.grows(shell.sheet, "details-context", RectangleShape)
+            .fillMaxWidth().heightIn(min = 64.dp)
+            .pressable({ shell.open(Surface.Context, "details-context") }, RectangleShape, Tone.Panel, Tone.Raise, depth = 1f)
+            .padding(horizontal = Space.S4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(36.dp).background(if (chosen != null) accent.copy(alpha = 0.16f) else Tone.Raise, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Glyph.Contexts, if (chosen != null) accent else Ink.Three, size = 18.dp)
         }
+        Spacer(Modifier.width(Space.S3))
+        Column(Modifier.weight(1f)) {
+            BasicText(chosen ?: tr("No context", "Bez kontekstu"), style = Type.Body.copy(color = Ink.One, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(
+                if (chosen == null) tr("Answers from the chat alone", "Odpowiedzi tylko z czatu")
+                else info?.tokens?.let { tokens(it) } ?: tr("Change", "Zmień"),
+                style = Type.Meta.copy(color = Ink.Three),
+            )
+        }
+        Icon(Glyph.Right, Ink.Four, size = 16.dp)
     }
 }
 

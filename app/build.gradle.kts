@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val appVersion = "0.2.0"
+val appVersion = "0.2.1"
 
 /** 0.2.0 is 200, 1.4.12 is 10412; each ABI build adds its digit in the millions on top. */
 val versionBase = appVersion.split('.').fold(0) { code, part -> code * 100 + part.toInt() }

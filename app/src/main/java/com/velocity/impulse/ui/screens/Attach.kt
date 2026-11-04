@@ -5,21 +5,16 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
 import android.util.Base64
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -29,7 +24,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,7 +35,6 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -52,40 +45,34 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
@@ -100,13 +87,16 @@ import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
-import com.velocity.impulse.ui.components.IconBtn
+import com.velocity.impulse.ui.components.Group
+import com.velocity.impulse.ui.components.Presentation
+import com.velocity.impulse.ui.components.Presented
+import com.velocity.impulse.ui.components.glass
+import com.velocity.impulse.ui.components.grows
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
-import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Radius
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
@@ -200,110 +190,75 @@ internal object Originals {
     }
 }
 
-/** The island's rounded outline: [w] by [h] from the bottom-left corner, where the plus sits. */
-private data class Grown(val w: Float, val h: Float, val r: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density) =
-        Outline.Rounded(RoundRect(0f, size.height - h, w, size.height, CornerRadius(r)))
-}
-
 /**
- * The plus opening into its menu the way the Dynamic Island grows: one island anchored at the
- * plus, its size and corner on a single spring, the plus turning into the island's close mark.
- * The rows arrive once the shape is most of the way there and leave first on the way back.
- * [grow] runs 0 (the plus) to 1 (the island); [plus] is the plus's bounds in root.
+ * The plus's menu: a frosted island that starts as the plus's own circle and grows up into its
+ * place above the composer, while the plus turns into a close mark on top of it. The rows are
+ * grouped the way the settings are. [plus] and [composer] are bounds in the window.
  */
 @Composable
 fun BoxScope.AddIsland(
-    open: Boolean,
-    grow: Animatable<Float, AnimationVector1D>,
+    menu: Presentation<Unit>,
     plus: State<Rect>,
-    onClose: () -> Unit,
+    composer: State<Rect>,
     onCamera: () -> Unit,
     onPhotos: () -> Unit,
     onFiles: () -> Unit,
 ) {
+    val haze = LocalShell.current.cardHaze
     val calm = LocalReduceMotion.current
-    LaunchedEffect(open) {
-        grow.animateTo(
-            if (open) 1f else 0f,
-            when {
-                calm -> tween(Motion.M2)
-                open -> spring(0.74f, 380f)
-                else -> spring(0.92f, 460f)
-            },
-        )
+    val row = if (Theme.palette.light) Tone.Panel else Tone.Hover
+    val host = remember { arrayOf(Offset.Zero) }
+    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+    fun Modifier.onPlus() = layout { measurable, _ ->
+        val at = plus.value
+        val p = measurable.measure(Constraints.fixed(at.width.roundToInt(), at.height.roundToInt()))
+        layout(p.width, p.height) { p.place((at.left - host[0].x).roundToInt(), (at.top - host[0].y).roundToInt()) }
     }
-    val shown by remember { derivedStateOf { grow.value > 0f } }
-    if (!open && !shown) return
-    BackHandler(open, onClose)
-    val host = remember { mutableStateOf(Offset.Zero) }
-    val corner = with(LocalDensity.current) { Radius.Sheet.toPx() }
-    Box(
-        Modifier.matchParentSize()
-            .onPlaced { host.value = it.positionInRoot() }
-            .then(if (open) Modifier.pointerInput(Unit) { detectTapGestures { onClose() } } else Modifier),
-    ) {
-        Box(
-            Modifier
-                .layout { measurable, c ->
-                    val p = measurable.measure(c.copy(minWidth = 0, minHeight = 0))
-                    layout(p.width, p.height) {
-                        val at = plus.value
-                        p.place((at.left - host.value.x).roundToInt(), (at.bottom - host.value.y).roundToInt() - p.height)
-                    }
+    Box(Modifier.matchParentSize().zIndex(1f).onPlaced { host[0] = it.positionInWindow() }) {
+        Box(Modifier.onPlus().grows(menu, "plus", CircleShape))
+        Presented(
+            menu,
+            Modifier.layout { measurable, c ->
+                val p = measurable.measure(c.copy(minWidth = 0, minHeight = 0))
+                layout(p.width, p.height) {
+                    p.place((plus.value.left - host[0].x).roundToInt(), (composer.value.top - host[0].y).roundToInt() - gap - p.height)
                 }
-                .width(248.dp)
-                .graphicsLayer {
-                    val t = grow.value
-                    val k = t.coerceIn(0f, 1f)
-                    val s = plus.value.width
-                    shape = Grown(s + (size.width - s) * k, s + (size.height - s) * k, s / 2f + (corner - s / 2f) * k)
-                    clip = true
-                    shadowElevation = 10.dp.toPx() * k
-                    ambientShadowColor = Color.Black.copy(alpha = 0.2f * Theme.palette.shade)
-                    spotShadowColor = Color.Black.copy(alpha = 0.3f * Theme.palette.shade)
-                    val over = 1f + max(0f, t - 1f) * 0.6f
-                    scaleX = over
-                    scaleY = over
-                    transformOrigin = TransformOrigin(0f, 1f)
-                }
-                .drawBehind { drawRect(Tone.Float, alpha = (grow.value * 6f).coerceIn(0f, 1f)) }
-                .pointerInput(Unit) { detectTapGestures { } },
+            },
+            Radius.Sheet,
+            Tone.Float,
+            frosted = true,
+            vanish = true,
         ) {
             Column(
-                Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 46.dp)
-                    .graphicsLayer {
-                        val c = ((grow.value - 0.55f) / 0.4f).coerceIn(0f, 1f)
-                        alpha = c
-                        translationY = (1f - c) * 8.dp.toPx()
-                        if (Build.VERSION.SDK_INT >= 31) renderEffect = if (c in 0.01f..0.99f) BlurEffect((1f - c) * 12f, (1f - c) * 12f) else null
-                    },
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                Modifier.width(264.dp).glass(haze, Shapes.Sheet, shadow = false).padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                listOf(
-                    Triple(Glyph.Camera, tr("Take a photo", "Zrób zdjęcie"), onCamera),
-                    Triple(Glyph.Image, tr("Add photos", "Dodaj zdjęcia"), onPhotos),
-                    Triple(Glyph.File, tr("Add a file", "Dodaj plik"), onFiles),
-                ).forEach { (glyph, label, go) ->
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .pressable(go, Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f, enabled = open)
-                            .padding(horizontal = Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(glyph, Ink.One, size = 20.dp)
-                        Spacer(Modifier.width(Space.S3))
-                        BasicText(label, style = Type.Body.copy(fontWeight = FontWeight.Medium))
-                    }
+                Group {
+                    AddRow(Glyph.Camera, tr("Take a photo", "Zrób zdjęcie"), row, onCamera)
+                    AddRow(Glyph.Image, tr("Add photos", "Dodaj zdjęcia"), row, onPhotos)
                 }
+                Group { AddRow(Glyph.File, tr("Add a file", "Dodaj plik"), row, onFiles) }
             }
-            IconBtn(
-                Glyph.Plus, onClose,
-                Modifier.align(Alignment.BottomStart).graphicsLayer { rotationZ = 45f * grow.value.coerceIn(0f, 1f) },
-                tint = Ink.Two, fill = Color.Transparent, size = 44.dp, description = tr("Close", "Zamknij"),
-            )
         }
+        // The plus stays on top of the island that grows from under it.
+        if (menu.item != null) Box(Modifier.onPlus(), contentAlignment = Alignment.Center) {
+            Icon(Glyph.Plus, Ink.Two, Modifier.graphicsLayer { if (!calm) rotationZ = 45f * menu.progress.value }, size = 44.dp * 0.48f)
+        }
+    }
+}
+
+@Composable
+private fun AddRow(glyph: Glyph, label: String, ground: Color, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .height(52.dp)
+            .pressable(onClick, RectangleShape, ground, Tone.Press, depth = 1f)
+            .padding(horizontal = Space.S4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(glyph, Ink.One, size = 20.dp)
+        Spacer(Modifier.width(Space.S3))
+        BasicText(label, style = Type.Body.copy(fontWeight = FontWeight.Medium))
     }
 }
 

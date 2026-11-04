@@ -12,7 +12,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -135,6 +134,8 @@ import com.velocity.impulse.data.strings
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.Pill
+import com.velocity.impulse.ui.components.AfterLanding
+import com.velocity.impulse.ui.components.LocalPresentation
 import com.velocity.impulse.ui.components.Avatar
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Choice
@@ -156,7 +157,6 @@ import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
-import com.velocity.impulse.ui.components.morphText
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Accents
 import com.velocity.impulse.ui.theme.Ink
@@ -215,7 +215,7 @@ private val Licenses = listOf(
 )
 
 @Composable
-fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollState) {
+fun SettingsPage(m: AppModel, scroll: ScrollState) {
     val uri = LocalUriHandler.current
     val x = rememberMachine(m)
     var signOut by remember { mutableStateOf(false) }
@@ -229,7 +229,7 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().glassSource(haze)) {
             Page(scroll) {
-                Title(tr("Settings", "Ustawienia"), scope)
+                Title(tr("Settings", "Ustawienia"))
                 val me = m.me
                 val name = me?.name?.ifBlank { null } ?: "Impulse"
                 Header(m, name, Modifier.arrive(0)) { Avatar(name, me?.avatar, me?.photo, 64.dp) }
@@ -247,74 +247,76 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
                     Switch(tr("Haptics", "Wibracje"), tr("Light taps under your finger as things move", "Lekkie stuknięcia pod palcem, gdy coś się rusza"), m.haptics) { m.pickHaptics(it) }
                 }
 
-                Section(tr("Personality", "Osobowość"), 2, tr("Who answers you, here and on your computer.", "Kto ci odpowiada, tu i na komputerze.")) { Personality(m) }
+                AfterLanding {
+                    Section(tr("Personality", "Osobowość"), 2, tr("Who answers you, here and on your computer.", "Kto ci odpowiada, tu i na komputerze.")) { Personality(m) }
 
-                Section(tr("Answers", "Odpowiedzi"), 3, tr("Shared with Impulse on your computer.", "Wspólne z Impulse na komputerze.")) { AnswerRows(m) }
+                    Section(tr("Answers", "Odpowiedzi"), 3, tr("Shared with Impulse on your computer.", "Wspólne z Impulse na komputerze.")) { AnswerRows(m) }
 
-                Section(tr("Model", "Model"), 4, tr("Defaults for every chat. A chat can set its own in its details.", "Domyślne dla każdego czatu. Czat może mieć własne w szczegółach.")) {
-                    Effort(m)
-                    Samplers.forEach { key(it.key) { Dial(m, it) } }
-                    Seed(m)
-                    Stops(m)
-                }
-                Btn(
-                    tr("Reset to defaults", "Przywróć domyślne"),
-                    {
-                        AppModel.SAMPLING.forEach { if (m.sampling.has(it)) m.setSampling(it, null) }
-                        if (m.effort != null && m.effort != "medium") m.pickEffort("medium")
-                    },
-                    Modifier.fillMaxWidth().arrive(4),
-                    Variant.Standard,
-                    Glyph.Refresh,
-                    enabled = m.sampling.length() > 0 || (m.effort != null && m.effort != "medium"),
-                )
-
-                Section(tr("Chat", "Czat"), 5) { ChatRows(m) }
-
-                Section(tr("Account", "Konto"), 6) { AccountRows(m, name) { password = true } }
-
-                Section(tr("Computer", "Komputer"), 7) { ComputerRows(m, x, { leave = true }, { restart = true }) }
-
-                Section(tr("Signed-in devices", "Zalogowane urządzenia"), 8, tr("Phones and browsers that reach this computer from outside it.", "Telefony i przeglądarki, które łączą się z komputerem z zewnątrz.")) {
-                    DeviceRows(x) { device = it; dropping = true }
-                }
-                Btn(tr("Sign out", "Wyloguj się"), { signOut = true }, Modifier.fillMaxWidth().arrive(8), Variant.Danger, Glyph.SignOut)
-
-                Section(tr("Storage", "Pamięć"), 9) {
-                    val n = m.chats.size
-                    Line(
-                        tr("Clear local cache", "Wyczyść pamięć podręczną"),
-                        if (n == 1) tr("1 chat kept on this phone", "1 czat na tym telefonie") else tr("$n chats kept on this phone", "Czaty na tym telefonie: $n"),
-                        { clear = true },
-                    ) {
-                        Icon(Glyph.Trash, Ink.Three, size = 20.dp)
+                    Section(tr("Model", "Model"), 4, tr("Defaults for every chat. A chat can set its own in its details.", "Domyślne dla każdego czatu. Czat może mieć własne w szczegółach.")) {
+                        Effort(m)
+                        Samplers.forEach { key(it.key) { Dial(m, it) } }
+                        Seed(m)
+                        Stops(m)
                     }
-                }
+                    Btn(
+                        tr("Reset to defaults", "Przywróć domyślne"),
+                        {
+                            AppModel.SAMPLING.forEach { if (m.sampling.has(it)) m.setSampling(it, null) }
+                            if (m.effort != null && m.effort != "medium") m.pickEffort("medium")
+                        },
+                        Modifier.fillMaxWidth().arrive(4),
+                        Variant.Standard,
+                        Glyph.Refresh,
+                        enabled = m.sampling.length() > 0 || (m.effort != null && m.effort != "medium"),
+                    )
 
-                Section(tr("Updates", "Aktualizacje"), 10) { UpdateRows() }
+                    Section(tr("Chat", "Czat"), 5) { ChatRows(m) }
 
-                Section(tr("About", "O aplikacji"), 11) {
-                    Line(tr("Source code", "Kod źródłowy"), Source.substringAfter("://"), { uri.openUri(Source) }) {
-                        Icon(Glyph.Right, Ink.Four, size = 16.dp)
+                    Section(tr("Account", "Konto"), 6) { AccountRows(m, name) { password = true } }
+
+                    Section(tr("Computer", "Komputer"), 7) { ComputerRows(m, x, { leave = true }, { restart = true }) }
+
+                    Section(tr("Signed-in devices", "Zalogowane urządzenia"), 8, tr("Phones and browsers that reach this computer from outside it.", "Telefony i przeglądarki, które łączą się z komputerem z zewnątrz.")) {
+                        DeviceRows(x) { device = it; dropping = true }
                     }
-                    Disclosure(tr("Open-source licenses", "Licencje open source")) {
-                        Licenses.forEach { l ->
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .pressable({ uri.openUri(l.url) }, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f)
-                                    .padding(horizontal = Space.S2, vertical = Space.S2),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    BasicText(l.name, style = Type.Body)
-                                    BasicText(l.license, style = Type.Meta)
+                    Btn(tr("Sign out", "Wyloguj się"), { signOut = true }, Modifier.fillMaxWidth().arrive(8), Variant.Danger, Glyph.SignOut)
+
+                    Section(tr("Storage", "Pamięć"), 9) {
+                        val n = m.chats.size
+                        Line(
+                            tr("Clear local cache", "Wyczyść pamięć podręczną"),
+                            if (n == 1) tr("1 chat kept on this phone", "1 czat na tym telefonie") else tr("$n chats kept on this phone", "Czaty na tym telefonie: $n"),
+                            { clear = true },
+                        ) {
+                            Icon(Glyph.Trash, Ink.Three, size = 20.dp)
+                        }
+                    }
+
+                    Section(tr("Updates", "Aktualizacje"), 10) { UpdateRows() }
+
+                    Section(tr("About", "O aplikacji"), 11) {
+                        Line(tr("Source code", "Kod źródłowy"), Source.substringAfter("://"), { uri.openUri(Source) }) {
+                            Icon(Glyph.Right, Ink.Four, size = 16.dp)
+                        }
+                        Disclosure(tr("Open-source licenses", "Licencje open source")) {
+                            Licenses.forEach { l ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .pressable({ uri.openUri(l.url) }, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f)
+                                        .padding(horizontal = Space.S2, vertical = Space.S2),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        BasicText(l.name, style = Type.Body)
+                                        BasicText(l.license, style = Type.Meta)
+                                    }
+                                    Icon(Glyph.Right, Ink.Four, size = 16.dp)
                                 }
-                                Icon(Glyph.Right, Ink.Four, size = 16.dp)
                             }
                         }
                     }
+                    if (Updater.release != null) Spacer(Modifier.height(IslandHeight + Space.S3))
                 }
-                if (Updater.release != null) Spacer(Modifier.height(IslandHeight + Space.S3))
             }
         }
         UpdateIsland(haze)
@@ -335,7 +337,7 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
 }
 
 @Composable
-fun ComputerPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollState) {
+fun ComputerPage(m: AppModel, scroll: ScrollState) {
     val x = rememberMachine(m)
     var signOut by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
@@ -344,7 +346,7 @@ fun ComputerPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
     var dropping by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Page(scroll) {
-            Title(tr("Computer", "Komputer"), scope)
+            Title(tr("Computer", "Komputer"))
             Header(m, tr("Your computer", "Twój komputer"), Modifier.arrive(0)) {
                 Box(Modifier.size(64.dp).background(Tone.Raise, Shapes.Tile), contentAlignment = Alignment.Center) {
                     Icon(linkGlyph(m.link), Ink.Two, size = 28.dp)
@@ -364,8 +366,8 @@ fun ComputerPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
 }
 
 @Composable
-private fun Title(text: String, scope: AnimatedVisibilityScope) {
-    BasicText(text, Modifier.morphText(LocalShell.current.pageOrigin, scope), style = TitleStyle)
+private fun Title(text: String) {
+    BasicText(text, style = TitleStyle)
 }
 
 /** A titled block of settings: its rows share one rounded container, 2dp apart. */
@@ -1787,9 +1789,10 @@ private fun linkGlyph(l: Link?) = when (l) {
     else -> Glyph.Globe
 }
 
-/** Each block rises in after the one above it, on a spring with no overshoot, so text never bounces. */
+/** Each block rises in after the one above it, on a spring with no overshoot, so text never bounces; a grown surface brings them in itself. */
 @Composable
 private fun Modifier.arrive(order: Int): Modifier {
+    if (LocalPresentation.current != null) return this
     val calm = LocalShell.current.calm
     val lift = with(LocalDensity.current) { 28.dp.toPx() }
     val p = remember { Animatable(0f) }
