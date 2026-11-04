@@ -73,7 +73,7 @@ fun Btn(
     Row(
         modifier
             .height(height)
-            .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled)
+            .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled, stretch = true)
             .padding(horizontal = Space.S4),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -97,7 +97,7 @@ fun IconBtn(
     enabled: Boolean = true,
 ) {
     Box(
-        modifier.size(size).pressable(onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press, depth = 0.88f, enabled = enabled),
+        modifier.size(size).pressable(onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press, depth = 0.88f, enabled = enabled, stretch = true),
         contentAlignment = Alignment.Center,
     ) {
         Image(icon, null, Modifier.size(size * 0.5f), colorFilter = ColorFilter.tint(tint))
@@ -112,7 +112,7 @@ fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = M
     Box(
         modifier
             .size(51.dp, 31.dp)
-            .pressable({ onChange(!checked) }, depth = 0.92f, role = Role.Switch)
+            .pressable({ onChange(!checked) }, depth = 0.92f, role = Role.Switch, stretch = true)
             .background(track, CircleShape)
             .padding(2.dp),
     ) {
@@ -120,22 +120,20 @@ fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = M
     }
 }
 
-/** Equal-width segments; the thumb travels to the chosen one. */
+/** Equal-width segments; the thumb travels to the chosen one and can be dragged between them. */
 @Composable
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.fillMaxWidth().height(40.dp).background(Tone.Inset, Shapes.Control).padding(3.dp)) {
-        val w = maxWidth / options.size
-        val x by animateDpAsState(w * selected, Motion.travel(), label = "thumb")
-        Box(Modifier.offset(x = x).width(w).fillMaxHeight().background(Tone.Hover, Shapes.ControlSm))
-        Row(Modifier.fillMaxWidth()) {
-            options.forEachIndexed { i, label ->
-                val ink by animateColorAsState(if (i == selected) Ink.One else Ink.Three, label = "seg")
-                Box(
-                    Modifier.weight(1f).fillMaxHeight().pressable({ onSelect(i) }, depth = 0.95f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText(label, style = Type.Meta.copy(color = ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center))
-                }
+    LiquidSlots(
+        options.size, selected, onSelect, Tone.Hover, Shapes.ControlSm,
+        modifier.fillMaxWidth().height(40.dp).background(Tone.Inset, Shapes.Control).padding(3.dp),
+    ) {
+        options.forEachIndexed { i, label ->
+            val ink by animateColorAsState(if (i == selected) Ink.One else Ink.Three, label = "seg")
+            Box(
+                Modifier.weight(1f).fillMaxHeight().pressable({ onSelect(i) }, depth = 0.96f),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(label, style = Type.Meta.copy(color = ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center))
             }
         }
     }

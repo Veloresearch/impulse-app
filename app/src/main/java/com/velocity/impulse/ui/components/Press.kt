@@ -50,6 +50,7 @@ fun Modifier.pressable(
     enabled: Boolean = true,
     haptic: Boolean = true,
     role: Role = Role.Button,
+    stretch: Boolean = false,
 ): Modifier = composed {
     val source = remember { MutableInteractionSource() }
     val down by source.collectIsPressedAsState()
@@ -61,7 +62,7 @@ fun Modifier.pressable(
     val scope = rememberCoroutineScope()
 
     var m = this
-    if (enabled && !calm) m = m.pointerInput(Unit) {
+    if (stretch && enabled && !calm) m = m.pointerInput(Unit) {
         val reach = 28.dp.toPx()
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)

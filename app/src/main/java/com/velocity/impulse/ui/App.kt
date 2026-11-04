@@ -78,6 +78,7 @@ import kotlinx.coroutines.launch
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Stage
 import com.velocity.impulse.ui.components.ImpulseMark
+import com.velocity.impulse.ui.components.LiquidSlots
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.screens.ChatScreen
 import com.velocity.impulse.ui.screens.ConnectScreen
@@ -108,22 +109,22 @@ fun App(m: AppModel) {
         var intro by rememberSaveable { mutableStateOf(!m.reduceMotion) }
         var handed by rememberSaveable { mutableStateOf(!intro) }
         val reveal = remember { Animatable(if (handed) 1f else 0f) }
-        LaunchedEffect(handed) { if (handed) reveal.animateTo(1f, tween(900, easing = Motion.Out)) }
+        LaunchedEffect(handed) { if (handed) reveal.animateTo(1f, tween(650, easing = Motion.Out)) }
 
         Box(Modifier.fillMaxSize().background(Tone.App)) {
             Box(
                 Modifier.fillMaxSize().graphicsLayer {
                     val p = reveal.value
                     alpha = p
-                    scaleX = 0.9f + 0.1f * p
-                    scaleY = 0.9f + 0.1f * p
+                    scaleX = 0.96f + 0.04f * p
+                    scaleY = 0.96f + 0.04f * p
                     renderEffect = if (android.os.Build.VERSION.SDK_INT >= 31 && p < 0.99f) {
-                        val r = (1f - p) * 36f
+                        val r = (1f - p) * 18f
                         android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
                     } else null
                 },
             ) {
-                AnimatedContent(
+                if (handed) AnimatedContent(
                     m.stage,
                     transitionSpec = {
                         (fadeIn(tween(Motion.M4, easing = Motion.Out)) + scaleIn(tween(Motion.M4, easing = Motion.Out), 0.94f)) togetherWith
@@ -188,7 +189,8 @@ private fun pageMotion(from: Int, to: Int, calm: Boolean): ContentTransform {
 @Composable
 private fun TabBar(tab: Tab, glass: HazeState, onTab: (Tab) -> Unit) {
     val accent = LocalAccent.current
-    BoxWithConstraints(
+    LiquidSlots(
+        Tab.entries.size, tab.ordinal, { onTab(Tab.entries[it]) }, accent.copy(alpha = 0.18f), Shapes.Card,
         Modifier.navigationBarsPadding().padding(horizontal = Space.S4, vertical = Space.S2)
             .fillMaxWidth().height(64.dp)
             .clip(Shapes.Panel)
@@ -196,34 +198,18 @@ private fun TabBar(tab: Tab, glass: HazeState, onTab: (Tab) -> Unit) {
             .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.07f), Color.Transparent)))
             .padding(6.dp),
     ) {
-        val w = maxWidth / Tab.entries.size
-        val lead = remember { Animatable(w * tab.ordinal, Dp.VectorConverter) }
-        val trail = remember { Animatable(w * (tab.ordinal + 1), Dp.VectorConverter) }
-        LaunchedEffect(tab, w) {
-            val right = w * tab.ordinal > lead.value
-            val quick = spring<Dp>(dampingRatio = 0.7f, stiffness = 900f)
-            val slow = spring<Dp>(dampingRatio = 0.62f, stiffness = 260f)
-            launch { lead.animateTo(w * tab.ordinal, if (right) slow else quick) }
-            launch { trail.animateTo(w * (tab.ordinal + 1), if (right) quick else slow) }
-        }
-        Box(
-            Modifier.offset(x = lead.value).width(trail.value - lead.value).fillMaxHeight()
-                .background(accent.copy(alpha = 0.18f), Shapes.Card),
-        )
-        Row(Modifier.fillMaxSize()) {
-            Tab.entries.forEach { t ->
-                val on = t == tab
-                val ink by animateColorAsState(if (on) accent else Ink.Three, label = "ink")
-                val lift by animateFloatAsState(if (on) 1f else 0f, spring(dampingRatio = 0.5f, stiffness = 500f), label = "lift")
-                Column(
-                    Modifier.weight(1f).fillMaxHeight().pressable({ onTab(t) }, depth = 0.88f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-                ) {
-                    Image(t.icon, t.label, Modifier.size(22.dp).graphicsLayer { scaleX = 1f + lift * 0.1f; scaleY = 1f + lift * 0.1f }, colorFilter = ColorFilter.tint(ink))
-                    Spacer(Modifier.height(2.dp))
-                    BasicText(t.label, style = Type.Label.copy(color = ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
-                }
+        Tab.entries.forEach { t ->
+            val on = t == tab
+            val ink by animateColorAsState(if (on) accent else Ink.Three, label = "ink")
+            val lift by animateFloatAsState(if (on) 1f else 0f, spring(dampingRatio = 0.5f, stiffness = 500f), label = "lift")
+            Column(
+                Modifier.weight(1f).fillMaxHeight().pressable({ onTab(t) }, depth = 0.88f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            ) {
+                Image(t.icon, t.label, Modifier.size(22.dp).graphicsLayer { scaleX = 1f + lift * 0.1f; scaleY = 1f + lift * 0.1f }, colorFilter = ColorFilter.tint(ink))
+                Spacer(Modifier.height(2.dp))
+                BasicText(t.label, style = Type.Label.copy(color = ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
             }
         }
     }

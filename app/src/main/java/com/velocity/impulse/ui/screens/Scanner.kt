@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -94,7 +95,13 @@ fun Scanner(onCode: (String) -> Unit, modifier: Modifier = Modifier) {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = it }
-    LaunchedEffect(Unit) { if (!allowed) ask.launch(Manifest.permission.CAMERA) }
+    var awake by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(380)
+        awake = true
+        if (!allowed) ask.launch(Manifest.permission.CAMERA)
+    }
+    val live by animateFloatAsState(if (awake && allowed) 1f else 0f, tween(600, easing = Motion.Out), label = "live")
 
     var spot by remember { mutableStateOf<Spot?>(null) }
     var code by remember { mutableStateOf<String?>(null) }
@@ -109,10 +116,12 @@ fun Scanner(onCode: (String) -> Unit, modifier: Modifier = Modifier) {
     }
 
     Box(modifier.fillMaxWidth().aspectRatio(0.92f).clip(Shapes.Panel).background(Tone.Inset), contentAlignment = Alignment.Center) {
-        if (allowed) {
-            Camera(onSpot = { spot = it }, onCode = { if (code == null) code = it }, paused = code != null)
+        if (allowed && awake) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = live }) {
+                Camera(onSpot = { spot = it }, onCode = { if (code == null) code = it }, paused = code != null)
+            }
             Frame(spot, code != null)
-        } else {
+        } else if (awake) {
             Column(
                 Modifier.padding(Space.S5),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -210,7 +219,6 @@ private fun Frame(spot: Spot?, locked: Boolean) {
     val accent = LocalAccent.current
     val t = rememberInfiniteTransition(label = "frame")
     val breath by t.animateFloat(0.6f, 0.64f, infiniteRepeatable(tween(1600, easing = Motion.Standard), RepeatMode.Reverse), label = "breath")
-    val sweep by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = Motion.Standard), RepeatMode.Reverse), label = "sweep")
     val lock by animateFloatAsState(if (locked) 1f else 0f, spring(dampingRatio = 0.55f, stiffness = 420f), label = "lock")
     val near by animateFloatAsState(if (spot != null) 1f else 0f, Motion.travel(), label = "near")
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -225,15 +233,9 @@ private fun Frame(spot: Spot?, locked: Boolean) {
             val o = Offset(box.left + shrink, box.top + shrink)
             val s = Size(box.width - 2 * shrink, box.height - 2 * shrink)
             val small = minOf(s.width, s.height)
-            val arm = small * (0.18f + 0.08f * near)
-            val r = small * 0.12f
-            val ink = lerp(lerp(Color.White, accent, near * 0.5f), accent, lock)
-            val shade = Path().apply {
-                addRect(Rect(Offset.Zero, size))
-                addRoundRect(RoundRect(o.x, o.y, o.x + s.width, o.y + s.height, CornerRadius(r)))
-                fillType = PathFillType.EvenOdd
-            }
-            drawPath(shade, Color.Black.copy(alpha = 0.32f + 0.2f * near))
+            val arm = small * 0.2f
+            val r = small * 0.16f
+            val ink = lerp(Color.White, accent, lock)
             for ((cx, cy) in listOf(0f to 0f, 1f to 0f, 1f to 1f, 0f to 1f)) {
                 val x = o.x + cx * s.width
                 val y = o.y + cy * s.height
@@ -245,15 +247,7 @@ private fun Frame(spot: Spot?, locked: Boolean) {
                     quadraticTo(x, y, x + dx * r, y)
                     lineTo(x + dx * arm, y)
                 }
-                drawPath(corner, ink, style = Stroke((4.5f + 1.5f * lock) * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
-            if (near < 0.99f && lock < 0.01f) {
-                val y = o.y + s.height * (0.08f + 0.84f * sweep)
-                val band = s.height * 0.09f
-                drawRect(
-                    Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.32f * (1f - near)), Color.Transparent), y - band, y + band),
-                    Offset(o.x + s.width * 0.06f, y - band), Size(s.width * 0.88f, band * 2),
-                )
+                drawPath(corner, ink.copy(alpha = 0.92f), style = Stroke((3f + 1f * lock) * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
             if (lock > 0.01f) {
                 val c = Offset(o.x + s.width / 2, o.y + s.height / 2)

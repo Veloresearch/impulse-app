@@ -48,8 +48,9 @@ import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import kotlin.math.pow
 
-const val INTRO_HANDOFF = 2250f
-private const val LENGTH = 2800f
+const val INTRO_HANDOFF = 2450f
+private const val LENGTH = 2650f
+private const val LEAVE = 2100f
 
 private val InOut = CubicBezierEasing(0.65f, 0f, 0.25f, 1f)
 private val Glide = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
@@ -87,23 +88,24 @@ fun Intro(onHandoff: () -> Unit, onDone: () -> Unit) {
 
     Box(
         Modifier.fillMaxSize()
-            .graphicsLayer { alpha = 1f - seg(clock.value, INTRO_HANDOFF, LENGTH, InOut) }
-            .background(Tone.Void)
+            .graphicsLayer { alpha = 1f - seg(clock.value, INTRO_HANDOFF, LENGTH, LinearEasing) }
+            .background(Tone.App)
             .clickable(remember { MutableInteractionSource() }, null) {},
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.graphicsLayer {
-                val out = seg(clock.value, INTRO_HANDOFF, LENGTH, Motion.Leave)
-                scaleX = 1f - out * 0.04f
-                scaleY = 1f - out * 0.04f
-                blur(out * 24f)
+            Modifier.fillMaxSize().graphicsLayer {
+                val out = seg(clock.value, LEAVE, INTRO_HANDOFF, Motion.Leave)
+                alpha = 1f - out
+                scaleX = 1f - out * 0.05f
+                scaleY = 1f - out * 0.05f
+                blur(out * 20f)
             },
             contentAlignment = Alignment.Center,
         ) {
             Canvas(
                 Modifier.size(MARK.dp).graphicsLayer {
-                    val lock = seg(clock.value, 1150f, 1850f, Glide)
+                    val lock = seg(clock.value, 1250f, 1950f, Glide)
                     val total = (SMALL + GAP).dp.toPx() + wordWidth
                     val scale = 1f - (1f - SMALL / MARK) * lock
                     scaleX = scale
@@ -116,14 +118,14 @@ fun Intro(onHandoff: () -> Unit, onDone: () -> Unit) {
                 Modifier
                     .onSizeChanged { wordWidth = it.width }
                     .graphicsLayer {
-                        val lock = seg(clock.value, 1150f, 1850f, Glide)
+                        val lock = seg(clock.value, 1250f, 1950f, Glide)
                         val total = (SMALL + GAP).dp.toPx() + wordWidth
                         val home = total / 2 - wordWidth / 2f
-                        translationX = home - (1f - lock) * 40.dp.toPx()
+                        translationX = home - (1f - lock) * 14.dp.toPx()
                         alpha = if (wordWidth == 0) 0f else 1f
                     }
                     .drawWithContent {
-                        val show = seg(clock.value, 1200f, 1900f, Glide)
+                        val show = seg(clock.value, 1420f, 2000f, Glide)
                         clipRect(right = size.width * show) { this@drawWithContent.drawContent() }
                     },
             ) {
@@ -131,7 +133,7 @@ fun Intro(onHandoff: () -> Unit, onDone: () -> Unit) {
                 BasicText(
                     "by Velocity",
                     Modifier.graphicsLayer {
-                        val p = seg(clock.value, 1550f, 2050f, Glide)
+                        val p = seg(clock.value, 1650f, 2050f, Glide)
                         alpha = p
                         translationY = (1f - p) * 6.dp.toPx()
                     },
@@ -145,16 +147,14 @@ fun Intro(onHandoff: () -> Unit, onDone: () -> Unit) {
 private fun DrawScope.drawVortex(t: Float) {
     val c = Offset(size.width / 2, size.height / 2)
     val base = size.minDimension
-    val enter = seg(t, 0f, 320f, LinearEasing)
-    val turn = -75f * (1f - seg(t, 0f, 1250f, InOut))
-    val grow = 0.86f + 0.14f * seg(t, 0f, 1250f, InOut)
+    val turn = -60f * (1f - seg(t, 0f, 1300f, InOut))
     for (i in 0 until LAYERS) {
-        val start = 120f + i * 30f
-        val p = seg(t, start, start + 950f, InOut)
-        val shown = if (i == 0) enter else seg(t, start, start + 260f, LinearEasing)
+        val start = 60f + i * 34f
+        val p = seg(t, start, start + 900f, InOut)
+        val shown = seg(t, start, start + 220f, LinearEasing)
         if (shown <= 0f) continue
-        val s = base * grow * (1f - (1f - STEP.pow(i)) * p)
-        rotate(i * TWIST * p + turn, c) {
+        val s = base * STEP.pow(i) * (0.2f + 0.8f * p)
+        rotate(i * TWIST * p + turn - 30f * (1f - p), c) {
             drawRect(layerColor(i), Offset(c.x - s / 2, c.y - s / 2), Size(s, s), alpha = shown)
         }
     }
