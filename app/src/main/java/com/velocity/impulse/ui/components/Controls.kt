@@ -45,6 +45,7 @@ import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Space
+import com.velocity.impulse.ui.theme.Squircle
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 
@@ -72,7 +73,7 @@ fun Btn(
     Row(
         modifier
             .height(height)
-            .pressable(onClick, Shapes.ControlLg, rest, down, enabled = enabled)
+            .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled)
             .padding(horizontal = Space.S4),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -81,7 +82,7 @@ fun Btn(
             Image(icon, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(ink))
             Spacer(Modifier.width(Space.S2))
         }
-        BasicText(text, style = Type.Body.copy(color = ink, fontWeight = FontWeight(600)))
+        BasicText(text, style = Type.Body.copy(color = ink, fontWeight = FontWeight.SemiBold))
     }
 }
 
@@ -133,7 +134,7 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
                     Modifier.weight(1f).fillMaxHeight().pressable({ onSelect(i) }, depth = 0.95f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    BasicText(label, style = Type.Meta.copy(color = ink, fontWeight = FontWeight(600), textAlign = TextAlign.Center))
+                    BasicText(label, style = Type.Meta.copy(color = ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center))
                 }
             }
         }

@@ -71,7 +71,7 @@ fun HomeScreen(m: AppModel, openChat: () -> Unit, openContexts: () -> Unit) {
                     Column(
                         Modifier.fillMaxWidth().pressable({ m.open(c.id); openChat() }, Shapes.Tile, Tone.Panel, Tone.Raise, depth = 0.985f).padding(Space.S4),
                     ) {
-                        BasicText(c.title.ifBlank { "Chat" }, style = Type.Body.copy(fontWeight = FontWeight(550)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        BasicText(c.title.ifBlank { "Chat" }, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         BasicText(c.messages.lastOrNull()?.content.orEmpty().replace('\n', ' '), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -111,7 +111,7 @@ private fun Status(m: AppModel) {
                     false -> "Cannot reach your computer"
                     null -> "Checking…"
                 },
-                style = Type.Body.copy(fontWeight = FontWeight(600)),
+                style = Type.Body.copy(fontWeight = FontWeight.SemiBold),
             )
             BasicText(m.link?.label ?: "", style = Type.Meta)
         }
@@ -125,7 +125,7 @@ private fun Tile(label: String, value: String, detail: String?, modifier: Modifi
         verticalArrangement = Arrangement.spacedBy(Space.S1),
     ) {
         BasicText(label, style = Type.Label)
-        BasicText(value, style = Type.Body.copy(fontWeight = FontWeight(600)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicText(value, style = Type.Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
         BasicText(detail ?: " ", style = Type.Meta, maxLines = 1)
     }
 }

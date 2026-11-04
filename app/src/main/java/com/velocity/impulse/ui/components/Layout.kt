@@ -73,7 +73,7 @@ fun ListRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            BasicText(title, style = Type.Body.copy(fontWeight = FontWeight(550)))
+            BasicText(title, style = Type.Body.copy(fontWeight = FontWeight.Medium))
             if (detail != null) BasicText(detail, style = Type.Meta)
         }
         Spacer(Modifier.width(Space.S3))
@@ -103,7 +103,7 @@ fun <T> Choice(
                 .padding(horizontal = Space.S4, vertical = Space.S3),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight(550)))
+            BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
             BasicText(label(selected), style = Type.Body.copy(color = Ink.Three))
             Spacer(Modifier.width(Space.S2))
             Image(Icons.Default.KeyboardArrowDown, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
@@ -152,7 +152,7 @@ fun Disclosure(title: String, modifier: Modifier = Modifier, content: @Composabl
                 .padding(horizontal = Space.S4),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight(550)))
+            BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
             Image(Icons.Default.KeyboardArrowRight, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
         }
         AnimatedVisibility(

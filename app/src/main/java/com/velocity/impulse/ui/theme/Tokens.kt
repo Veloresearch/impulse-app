@@ -5,8 +5,13 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontSynthesis
+import androidx.compose.ui.text.font.FontVariation
+import com.velocity.impulse.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -84,15 +89,37 @@ object Motion {
     fun <T> settle() = spring<T>(dampingRatio = 0.9f, stiffness = Spring.StiffnessLow)
 }
 
-private val Sans = FontFamily.Default
+private val Weights = listOf(300, 400, 500, 600)
+
+@OptIn(ExperimentalTextApi::class)
+/** Inter with its optical size fixed at [opsz]: 14 is the text cut, 32 the display cut. */
+private fun inter(opsz: Float) = FontFamily(
+    Weights.map { w ->
+        Font(
+            R.font.inter,
+            FontWeight(w),
+            variationSettings = FontVariation.Settings(FontVariation.weight(w), FontVariation.Setting("opsz", opsz)),
+        )
+    },
+)
+
+val InterText = inter(14f)
+private val InterTitle = inter(22f)
+private val InterDisplay = inter(32f)
+@OptIn(ExperimentalTextApi::class)
+val JetBrainsMono = FontFamily(
+    listOf(400, 500, 600).map { w -> Font(R.font.jetbrains_mono, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w))) },
+)
 
 object Type {
-    val Display = TextStyle(fontFamily = Sans, fontSize = 30.sp, fontWeight = FontWeight(680), letterSpacing = (-0.026).em, color = Ink.One)
-    val Hero = TextStyle(fontFamily = Sans, fontSize = 34.sp, fontWeight = FontWeight(680), letterSpacing = (-0.03).em, color = Ink.One)
-    val Title = TextStyle(fontFamily = Sans, fontSize = 22.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em, color = Ink.One)
-    val Section = TextStyle(fontFamily = Sans, fontSize = 17.sp, fontWeight = FontWeight(640), letterSpacing = (-0.014).em, color = Ink.One)
-    val Body = TextStyle(fontFamily = Sans, fontSize = 15.sp, fontWeight = FontWeight(450), lineHeight = 23.sp, color = Ink.One)
-    val Meta = TextStyle(fontFamily = Sans, fontSize = 13.sp, fontWeight = FontWeight(450), lineHeight = 18.sp, color = Ink.Three)
-    val Label = TextStyle(fontFamily = Sans, fontSize = 12.sp, fontWeight = FontWeight(550), color = Ink.Three)
-    val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = Ink.Two)
+    private val base = TextStyle(color = Ink.One, fontSynthesis = FontSynthesis.None)
+    val Display = base.copy(fontFamily = InterDisplay, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.026).em, lineHeight = 34.sp)
+    val Hero = base.copy(fontFamily = InterDisplay, fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.03).em)
+    val Brand = base.copy(fontFamily = InterDisplay, fontSize = 44.sp, fontWeight = FontWeight.Light, letterSpacing = (-0.035).em)
+    val Title = base.copy(fontFamily = InterTitle, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.02).em, lineHeight = 28.sp)
+    val Section = base.copy(fontFamily = InterText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.014).em)
+    val Body = base.copy(fontFamily = InterText, fontSize = 15.sp, fontWeight = FontWeight.Normal, lineHeight = 23.sp)
+    val Meta = base.copy(fontFamily = InterText, fontSize = 13.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp, color = Ink.Three)
+    val Label = base.copy(fontFamily = InterText, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Ink.Three)
+    val Mono = base.copy(fontFamily = JetBrainsMono, fontSize = 13.sp, lineHeight = 19.sp, color = Ink.Two)
 }

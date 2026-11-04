@@ -8,6 +8,18 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.unit.Dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -94,16 +106,21 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 fun App(m: AppModel) {
     CompositionLocalProvider(LocalAccent provides Accents[m.accent], LocalReduceMotion provides m.reduceMotion) {
         var intro by rememberSaveable { mutableStateOf(!m.reduceMotion) }
-        val reveal = remember { Animatable(if (intro) 0f else 1f) }
-        LaunchedEffect(intro) { if (!intro) reveal.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 140f)) }
+        var handed by rememberSaveable { mutableStateOf(!intro) }
+        val reveal = remember { Animatable(if (handed) 1f else 0f) }
+        LaunchedEffect(handed) { if (handed) reveal.animateTo(1f, tween(900, easing = Motion.Out)) }
 
         Box(Modifier.fillMaxSize().background(Tone.App)) {
             Box(
                 Modifier.fillMaxSize().graphicsLayer {
                     val p = reveal.value
-                    alpha = p.coerceIn(0f, 1f)
-                    scaleX = 0.92f + 0.08f * p
-                    scaleY = 0.92f + 0.08f * p
+                    alpha = p
+                    scaleX = 0.9f + 0.1f * p
+                    scaleY = 0.9f + 0.1f * p
+                    renderEffect = if (android.os.Build.VERSION.SDK_INT >= 31 && p < 0.99f) {
+                        val r = (1f - p) * 36f
+                        android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                    } else null
                 },
             ) {
                 AnimatedContent(
@@ -121,7 +138,7 @@ fun App(m: AppModel) {
                     }
                 }
             }
-            if (intro) Intro { intro = false }
+            if (intro) Intro(onHandoff = { handed = true }, onDone = { intro = false })
         }
     }
 }
@@ -135,9 +152,11 @@ private fun Main(m: AppModel) {
     val bar by animateDpAsState(if (typing) 0.dp else 84.dp, Motion.travel(), label = "bar")
     BackHandler(tab != Tab.Home) { tab = Tab.Home }
 
+    val glass = remember { HazeState() }
     Box(Modifier.fillMaxSize()) {
         AnimatedContent(
             tab,
+            Modifier.haze(glass),
             transitionSpec = { pageMotion(initialState.ordinal, targetState.ordinal, calm) },
             label = "tab",
         ) { t ->
@@ -154,7 +173,7 @@ private fun Main(m: AppModel) {
             enter = slideInVertically(Motion.travel()) { it } + fadeIn(),
             exit = slideOutVertically(tween(Motion.M2, easing = Motion.Leave)) { it } + fadeOut(),
         ) {
-            TabBar(tab) { tab = it }
+            TabBar(tab, glass) { tab = it }
         }
     }
 }
@@ -167,80 +186,45 @@ private fun pageMotion(from: Int, to: Int, calm: Boolean): ContentTransform {
 }
 
 @Composable
-private fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
+private fun TabBar(tab: Tab, glass: HazeState, onTab: (Tab) -> Unit) {
     val accent = LocalAccent.current
     BoxWithConstraints(
         Modifier.navigationBarsPadding().padding(horizontal = Space.S4, vertical = Space.S2)
             .fillMaxWidth().height(64.dp)
-            .background(Tone.Float, Shapes.Panel).padding(6.dp),
+            .clip(Shapes.Panel)
+            .hazeChild(glass, HazeStyle(Tone.App, HazeTint(Tone.Float.copy(alpha = 0.55f)), blurRadius = 26.dp, noiseFactor = 0.04f))
+            .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.07f), Color.Transparent)))
+            .padding(6.dp),
     ) {
         val w = maxWidth / Tab.entries.size
-        val x by animateDpAsState(w * tab.ordinal, spring(dampingRatio = 0.72f, stiffness = 420f), label = "pill")
-        Box(Modifier.offset(x = x).width(w).fillMaxHeight().background(accent.copy(alpha = 0.16f), Shapes.Card))
+        val lead = remember { Animatable(w * tab.ordinal, Dp.VectorConverter) }
+        val trail = remember { Animatable(w * (tab.ordinal + 1), Dp.VectorConverter) }
+        LaunchedEffect(tab, w) {
+            val right = w * tab.ordinal > lead.value
+            val quick = spring<Dp>(dampingRatio = 0.7f, stiffness = 900f)
+            val slow = spring<Dp>(dampingRatio = 0.62f, stiffness = 260f)
+            launch { lead.animateTo(w * tab.ordinal, if (right) slow else quick) }
+            launch { trail.animateTo(w * (tab.ordinal + 1), if (right) quick else slow) }
+        }
+        Box(
+            Modifier.offset(x = lead.value).width(trail.value - lead.value).fillMaxHeight()
+                .background(accent.copy(alpha = 0.18f), Shapes.Card),
+        )
         Row(Modifier.fillMaxSize()) {
             Tab.entries.forEach { t ->
                 val on = t == tab
                 val ink by animateColorAsState(if (on) accent else Ink.Three, label = "ink")
+                val lift by animateFloatAsState(if (on) 1f else 0f, spring(dampingRatio = 0.5f, stiffness = 500f), label = "lift")
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().pressable({ onTab(t) }, depth = 0.9f),
+                    Modifier.weight(1f).fillMaxHeight().pressable({ onTab(t) }, depth = 0.88f),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                 ) {
-                    Image(t.icon, t.label, Modifier.size(22.dp), colorFilter = ColorFilter.tint(ink))
+                    Image(t.icon, t.label, Modifier.size(22.dp).graphicsLayer { scaleX = 1f + lift * 0.1f; scaleY = 1f + lift * 0.1f }, colorFilter = ColorFilter.tint(ink))
                     Spacer(Modifier.height(2.dp))
-                    BasicText(t.label, style = Type.Label.copy(color = ink, fontSize = 11.sp, fontWeight = FontWeight(600)))
+                    BasicText(t.label, style = Type.Label.copy(color = ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
                 }
             }
-        }
-    }
-}
-
-/**
- * The opening: the spiral grows in from the outside and turns into place, the name settles under
- * it, and the whole thing lifts away into the app.
- */
-@Composable
-private fun Intro(onDone: () -> Unit) {
-    val build = remember { Animatable(0f) }
-    val spin = remember { Animatable(-70f) }
-    val name = remember { Animatable(0f) }
-    val leave = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        coroutineScope {
-            launch { build.animateTo(1f, tween(1050, easing = Motion.Out)) }
-            launch { spin.animateTo(0f, spring(dampingRatio = 0.62f, stiffness = 60f)) }
-            launch {
-                delay(520)
-                name.animateTo(1f, tween(Motion.M4, easing = Motion.Out))
-            }
-        }
-        delay(140)
-        leave.animateTo(1f, tween(460, easing = Motion.Sheet))
-        onDone()
-    }
-    Box(
-        Modifier.fillMaxSize().graphicsLayer { alpha = 1f - leave.value }.background(Tone.App),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            ImpulseMark(
-                Modifier.size(132.dp).graphicsLayer {
-                    val l = leave.value
-                    scaleX = 1f + l * 0.9f
-                    scaleY = 1f + l * 0.9f
-                },
-                build = build.value,
-                spin = spin.value,
-            )
-            Spacer(Modifier.height(Space.S5))
-            BasicText(
-                "Impulse",
-                Modifier.graphicsLayer {
-                    alpha = name.value * (1f - leave.value * 2f).coerceAtLeast(0f)
-                    translationY = (1f - name.value) * 14.dp.toPx()
-                },
-                style = Type.Hero.copy(letterSpacing = (0.12f - 0.15f * name.value).em),
-            )
         }
     }
 }

@@ -151,7 +151,7 @@ fun ChatScreen(m: AppModel, barHeight: androidx.compose.ui.unit.Dp, openContexts
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            BasicText(c.title.ifBlank { "Chat" }, style = Type.Body.copy(fontWeight = FontWeight(550)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(c.title.ifBlank { "Chat" }, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             BasicText("${c.messages.size / 2} questions", style = Type.Meta)
                         }
                         IconBtn(Icons.Default.Delete, { m.delete(c.id) }, tint = Ink.Four, fill = androidx.compose.ui.graphics.Color.Transparent, size = 40.dp)
@@ -218,7 +218,7 @@ private fun Thinking(text: String, active: Boolean) {
             BasicText(
                 if (active) "Thinking…" else "Thought it through",
                 Modifier.weight(1f).graphicsLayer { alpha = if (active) shimmer else 1f },
-                style = Type.Meta.copy(fontWeight = FontWeight(600)),
+                style = Type.Meta.copy(fontWeight = FontWeight.SemiBold),
             )
             Image(Icons.Default.KeyboardArrowRight, null, Modifier.size(18.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
         }

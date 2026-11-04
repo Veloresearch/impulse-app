@@ -84,12 +84,12 @@ private fun inline(s: String): AnnotatedString = buildAnnotatedString {
         when {
             s.startsWith("**", i) && s.indexOf("**", i + 2) > 0 -> {
                 val end = s.indexOf("**", i + 2)
-                withStyle(SpanStyle(fontWeight = FontWeight(650))) { append(s.substring(i + 2, end)) }
+                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(s.substring(i + 2, end)) }
                 i = end + 2
             }
             s[i] == '`' && s.indexOf('`', i + 1) > 0 -> {
                 val end = s.indexOf('`', i + 1)
-                withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Tone.Raise, color = Ink.One)) { append(s.substring(i + 1, end)) }
+                withStyle(SpanStyle(fontFamily = com.velocity.impulse.ui.theme.JetBrainsMono, background = Tone.Raise, color = Ink.One)) { append(s.substring(i + 1, end)) }
                 i = end + 1
             }
             s[i] == '*' && i + 1 < s.length && s[i + 1] != ' ' && s.indexOf('*', i + 1) > 0 -> {

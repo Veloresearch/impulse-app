@@ -71,7 +71,7 @@ private fun ContextCard(c: Context?, on: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            BasicText(c?.name ?: "No context", style = Type.Body.copy(fontWeight = FontWeight(600)))
+            BasicText(c?.name ?: "No context", style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
             BasicText(
                 if (c == null) "Answers use only the chat itself"
                 else listOfNotNull(c.tokens?.let { tokens(it) }, "${c.documents} documents").joinToString(" · "),

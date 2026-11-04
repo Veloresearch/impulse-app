@@ -11,17 +11,17 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.pow
 
-private const val LAYERS = 18
+internal const val LAYERS = 18
 private const val GREYS = 14
-private const val STEP = 0.905f
-private const val TWIST = 3.4f
+internal const val STEP = 0.905f
+internal const val TWIST = 3.4f
 
 private val Outer = Color(0xFF3B3841)
 private val Light = Color(0xFFECE9F0)
 private val EmberDeep = Color(0xFFB4602A)
-private val EmberLight = Color(0xFFF7B888)
+internal val EmberLight = Color(0xFFF7B888)
 
-private fun layerColor(i: Int): Color =
+internal fun layerColor(i: Int): Color =
     if (i < GREYS) lerp(Outer, Light, (i.toFloat() / (GREYS - 1)).pow(1.15f))
     else lerp(EmberDeep, EmberLight, (i - GREYS).toFloat() / (LAYERS - GREYS - 1))
 

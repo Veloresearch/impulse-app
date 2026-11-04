@@ -40,6 +40,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -70,13 +75,12 @@ fun ConnectScreen(m: AppModel) {
         Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Space.S5),
         verticalArrangement = Arrangement.spacedBy(Space.S5),
     ) {
-        Spacer(Modifier.height(Space.S5))
-        ImpulseMark(Modifier.size(56.dp), tile = true)
-        Column(verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-            BasicText("Connect to your computer", style = Type.Display)
+        Spacer(Modifier.height(Space.S6))
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.S3)) {
+            BasicText("Connect to your computer", style = Type.Display.copy(textAlign = TextAlign.Center))
             BasicText(
-                "Impulse runs on your PC. Open Settings › Phone there and scan the code, or type the address it shows.",
-                style = Type.Body.copy(color = Ink.Three),
+                "On your PC, open Impulse › Settings › Phone and scan the code it shows.",
+                style = Type.Body.copy(color = Ink.Three, textAlign = TextAlign.Center),
             )
         }
         Segmented(listOf("Scan code", "Type address"), mode, { mode = it })
@@ -129,8 +133,7 @@ fun SignInScreen(m: AppModel) {
         Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Space.S5),
         verticalArrangement = Arrangement.spacedBy(Space.S5),
     ) {
-        Spacer(Modifier.height(Space.S5))
-        ImpulseMark(Modifier.size(56.dp), tile = true)
+        Spacer(Modifier.height(Space.S6))
         Column(verticalArrangement = Arrangement.spacedBy(Space.S2)) {
             BasicText("Who is this?", style = Type.Display)
             BasicText("Pick your profile on ${m.link?.label?.lowercase() ?: "the computer"} and type its password.", style = Type.Body.copy(color = Ink.Three))
@@ -171,7 +174,7 @@ private fun ProfileCard(p: Profile, selected: Boolean, usable: Boolean, onClick:
         }
         Spacer(Modifier.width(Space.S3))
         Column(Modifier.weight(1f)) {
-            BasicText(p.name, style = Type.Body.copy(fontWeight = FontWeight(600)))
+            BasicText(p.name, style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
             BasicText(
                 when {
                     !p.hasPassword -> "No password yet"

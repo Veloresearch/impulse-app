@@ -18,7 +18,7 @@ import kotlin.math.sin
 /** A rectangle with continuous (superellipse) corners, the shape every surface in Impulse uses. */
 class Squircle(private val radius: Dp) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val r = min(with(density) { radius.toPx() } * 1.25f, min(size.width, size.height) / 2f)
+        val r = min(with(density) { radius.toPx() } * 1.53f, min(size.width, size.height) / 2f)
         val w = size.width
         val h = size.height
         val path = Path()
@@ -49,7 +49,7 @@ class Squircle(private val radius: Dp) : Shape {
 
     private companion object {
         const val STEPS = 14
-        const val EXP = 2f / 3.4f
+        const val EXP = 2f / 3.25f
     }
 }
 
