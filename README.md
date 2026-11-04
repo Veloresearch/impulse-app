@@ -14,6 +14,8 @@
 
 <p align="center">Made by Velocity, an independent AI company.</p>
 
+<p align="center"><b>Preview.</b> This is an early version of the app: everything works, and it is still changing fast.<br>It updates itself as new previews come out.</p>
+
 <p align="center">
   <a href="https://github.com/Veloresearch/impulse-app/releases/latest/download/Impulse-arm64-v8a.apk"><img alt="Android ARM64, most phones" src="https://img.shields.io/badge/android-ARM64%20%C2%B7%20most%20phones-8a7aa8?style=for-the-badge&labelColor=2d2b32"></a>
   <a href="https://github.com/Veloresearch/impulse-app/releases/latest/download/Impulse-armeabi-v7a.apk"><img alt="Android ARMv7, older phones" src="https://img.shields.io/badge/ARMv7-older%20phones-6b5d85?style=for-the-badge&labelColor=2d2b32"></a>
@@ -42,7 +44,7 @@
 - **Chat with the models on your computer.** Answers stream in as they are written, the model's thinking folds above each reply, and every chat syncs with Impulse on the desktop both ways.
 - **The web and your plugins.** The model searches the web, reads pages and calls the MCP plugins you set up in Impulse, and shows where its answer came from.
 - **Pictures and files.** Take a photo, pick from your gallery or add a document: PDF, Word, Excel, PowerPoint, text and code. Save what you see to your phone.
-- **Memory.** Pick one of your contexts and every answer can draw on it; each chat keeps its own memory across the conversation.
+- **Momentum.** Each chat keeps its own memory across the conversation, and you can pick one of your contexts for every answer to draw on. The chat's details show how much it holds and what each answer recalled.
 - **Your models, from your phone.** See what is loaded, switch models, set how hard they think, and download new ones to your computer.
 - **Talk.** Dictate a question, or switch to voice and just talk.
 - **Made to be held.** Dark, light and AMOLED themes, one accent colour, haptics and motion that follow your finger.
