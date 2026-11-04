@@ -1,5 +1,6 @@
 package com.velocity.impulse.ui.screens
 
+import android.os.Build
 import com.velocity.impulse.ui.components.ModelFace
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -14,15 +15,17 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,7 +42,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -51,7 +53,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -61,19 +62,25 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.velocity.impulse.R
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Loaded
 import com.velocity.impulse.data.Probe
@@ -108,37 +115,59 @@ import com.velocity.impulse.ui.theme.Space
 import com.velocity.impulse.ui.theme.Squircle
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeChild
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
-private val PillShape = Squircle(Radius.Card)
+private val HeadShape = Squircle(Radius.Card)
+private val Island = Squircle(22.dp)
+
+/** The same tone as the conversation, so the band is invisible until something scrolls under it. */
+private val Band = HazeStyle(Tone.App, HazeTint(Tone.App.copy(alpha = 0.58f)), blurRadius = 20.dp, noiseFactor = 0f)
 
 private fun same(a: String?, b: String?) =
     a != null && b != null && a.replace('\\', '/').equals(b.replace('\\', '/'), ignoreCase = true)
 
-/** Menu, the chat and its model, the chat's details: three islands that stay put while their text rolls. */
+/**
+ * The menu on the left, the chat and its model in the middle as plain text, new chat and details
+ * on the right; all on a frosted band that fades out downward.
+ */
 @Composable
 fun TopIsland(m: AppModel, modifier: Modifier = Modifier) {
     val shell = LocalShell.current
-    Row(
-        modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Chrome.Side, vertical = 8.dp).height(Chrome.TopIsland),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(44.dp).graphicsLayer { alpha = if (shell.docked) 0f else 1f }.glass(shell.cardHaze, CircleShape)) {
-            IconBtn(Glyph.Sidebar, shell::openDrawer, tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !shell.docked, island = true)
+    Box(modifier.fillMaxWidth()) {
+        Box(Modifier.matchParentSize().frostBand(shell))
+        Box(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Chrome.Side, vertical = 8.dp).height(Chrome.TopIsland),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.align(Alignment.CenterStart).size(44.dp).graphicsLayer { alpha = if (shell.docked) 0f else 1f }.glass(shell.cardHaze, CircleShape)) {
+                IconBtn(Glyph.Sidebar, shell::openDrawer, tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !shell.docked, island = true)
+            }
+            Heading(m, shell, Modifier.padding(horizontal = 96.dp))
+            Actions(m, shell, Modifier.align(Alignment.CenterEnd))
         }
-        Spacer(Modifier.width(8.dp))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Pill(m, shell) }
-        Spacer(Modifier.width(8.dp))
-        DetailsButton(m, shell)
     }
 }
+
+/** Blur under the islands, solid above and gone at the bottom edge, drawn into one offscreen layer. */
+private fun Modifier.frostBand(shell: Shell): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(Brush.verticalGradient(0.62f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+        }
+        .then(if (Build.VERSION.SDK_INT >= 31) Modifier.hazeChild(shell.cardHaze, Band) else Modifier.background(Tone.App.copy(alpha = 0.92f)))
 
 /** Ordered from worst to best, so the label rolls up when things get better. */
 private enum class Kind { Offline, None, Loading, Ready }
 
+/** The chat's title over its model and a chevron, as plain text; the model sheet grows out of it. */
 @Composable
-private fun Pill(m: AppModel, shell: Shell) {
+private fun Heading(m: AppModel, shell: Shell, modifier: Modifier) {
     val accent = LocalAccent.current
     val calm = shell.calm
     val title by remember(m) { derivedStateOf { m.chat?.title?.ifBlank { null } } }
@@ -172,19 +201,17 @@ private fun Pill(m: AppModel, shell: Shell) {
         }
     }
 
-    MorphSource("pill", Surface.Model) {
+    MorphSource("pill", Surface.Model, modifier) {
         Column(
-            Modifier.morph("pill", this, PillShape)
+            Modifier.morph("pill", this, HeadShape)
                 .graphicsLayer {
                     if (calm) return@graphicsLayer
-                    scaleX = 1f - 0.05f * pulse.value
+                    scaleX = 1f - 0.06f * pulse.value
                     scaleY = scaleX
                 }
-                .pressable({ shell.open(Surface.Model, "pill") }, depth = 0.95f, stretch = true, feelOnDown = true)
-                .glass(shell.cardHaze, PillShape)
-                .widthIn(min = 160.dp)
-                .height(52.dp)
-                .padding(horizontal = 14.dp),
+                .pressable({ shell.open(Surface.Model, "pill") }, depth = 0.95f, feelOnDown = true)
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 10.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -192,52 +219,63 @@ private fun Pill(m: AppModel, shell: Shell) {
                 Roll(title ?: tr("New chat", "Nowy czat"), Type.Body.copy(fontWeight = FontWeight.SemiBold), up = shell.sceneDir > 0)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedContent(
-                    kind,
-                    Modifier.size(18.dp),
-                    transitionSpec = {
-                        val enter = if (targetState == Kind.Ready && !calm) scaleIn(spring(0.5f, 500f), 0f) else fadeIn(tween(Motion.M2))
-                        val exit = if (initialState == Kind.Ready && !calm) scaleOut(tween(Motion.M2, easing = Motion.Out), 0f) else fadeOut(tween(Motion.M2))
-                        enter togetherWith exit using null
-                    },
-                    contentAlignment = Alignment.Center,
-                    label = "mark",
-                ) { k ->
-                    when (k) {
-                        Kind.Ready -> ModelFace(m, m.status?.model?.name.orEmpty(), m.status?.model?.family.orEmpty(), 18.dp)
-                        Kind.Loading -> Spinner(accent, 14.dp)
-                        Kind.None -> Icon(Glyph.Models, Ink.Three, size = 14.dp)
-                        Kind.Offline -> Icon(Glyph.Alert, Signal.Warn, size = 14.dp)
+                AnimatedVisibility(
+                    kind == Kind.Loading || kind == Kind.Offline,
+                    enter = fadeIn(tween(Motion.M2)) + expandHorizontally(Motion.calmText()),
+                    exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(Motion.calmText()),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (seen.last == Kind.Offline) Icon(Glyph.Alert, Signal.Warn, size = 12.dp) else Spinner(accent, 11.dp)
+                        Spacer(Modifier.width(5.dp))
                     }
                 }
-                Spacer(Modifier.width(6.dp))
-                Roll(label, Type.Meta.copy(fontWeight = FontWeight.Medium, color = Ink.Two), Modifier.weight(1f, fill = false), up = seen.up)
-                Spacer(Modifier.width(4.dp))
-                Icon(Glyph.Down, Ink.Three, size = 12.dp)
+                Roll(
+                    label,
+                    Type.Meta.copy(fontWeight = FontWeight.Medium, color = if (kind == Kind.Offline) Signal.Warn else Ink.Three),
+                    Modifier.weight(1f, fill = false),
+                    up = seen.up,
+                )
+                Spacer(Modifier.width(3.dp))
+                Icon(Glyph.Down, Ink.Three, size = 11.dp)
             }
         }
     }
 }
 
-/** Opens the chat's details on the right, the mirror of the menu on the left. */
+/** One island: a pencil for a new chat (only once this one has started) and the dots for its details. */
 @Composable
-private fun DetailsButton(m: AppModel, shell: Shell) {
+private fun Actions(m: AppModel, shell: Shell, modifier: Modifier) {
     val empty = m.current == null
-    val v by animateFloatAsState(if (empty) 0f else 1f, spring(0.8f, 500f), label = "details")
-    Box(
-        Modifier.size(44.dp)
-            .graphicsLayer {
-                alpha = v.coerceIn(0f, 1f)
-                if (shell.calm) return@graphicsLayer
-                scaleX = 0.6f + 0.4f * v
-                scaleY = scaleX
-            }
-            .glass(shell.cardHaze, CircleShape),
+    val pen = animateFloatAsState(if (empty) 0f else 1f, if (shell.calm) tween(Motion.M2) else spring(0.78f, 520f), label = "pen")
+    Row(
+        modifier.height(44.dp).glass(shell.cardHaze, Island).padding(horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconBtn(
-            Glyph.Info, shell::openDetails,
-            tint = Ink.One, fill = Color.Transparent, size = 44.dp, enabled = !empty, island = true,
-        )
+        Box(
+            Modifier
+                .layout { measurable, constraints ->
+                    val p = measurable.measure(constraints)
+                    layout((p.width * pen.value.coerceIn(0f, 1.08f)).roundToInt(), p.height) { p.place(0, 0) }
+                }
+                .graphicsLayer {
+                    val k = pen.value.coerceIn(0f, 1f)
+                    alpha = k
+                    if (shell.calm) return@graphicsLayer
+                    scaleX = 0.5f + 0.5f * pen.value
+                    scaleY = scaleX
+                },
+        ) {
+            Box(
+                Modifier.size(40.dp).pressable(
+                    { shell.newChat() }, CircleShape, Color.Transparent, Tone.Raise,
+                    depth = 0.88f, enabled = !empty, stretch = true, feelOnDown = true,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(painterResource(R.drawable.ph_pencil_simple_bold), tr("New chat", "Nowy czat"), Modifier.size(19.dp), colorFilter = ColorFilter.tint(Ink.One))
+            }
+        }
+        IconBtn(Glyph.More, shell::openDetails, tint = Ink.One, fill = Color.Transparent, size = 40.dp, enabled = !empty, island = true)
     }
 }
 
@@ -259,7 +297,9 @@ private fun Arc(color: Color, modifier: Modifier, whole: () -> Float) {
     }
 }
 
-private val Efforts = listOf("off", "low", "medium", "high", "max")
+internal val Efforts = listOf("off", "low", "medium", "high", "max")
+
+internal fun effortLabels() = listOf(tr("Instant", "Od razu"), tr("Low", "Krótko"), tr("Medium", "Średnio"), tr("High", "Dużo"), "Max")
 
 private enum class Phase { Idle, Current, Loading, Landed, Failed }
 
@@ -315,7 +355,7 @@ fun ColumnScope.ModelSheetBody(m: AppModel) {
         }
     }
 
-    BasicText(tr("Model", "Model"), style = Type.Title)
+    BasicText(tr("Model", "Model"), style = Type.BrandTitle)
     Spacer(Modifier.height(Space.S1))
     BasicText(tr("The model on your computer that writes the answers.", "Model na Twoim komputerze, który pisze odpowiedzi."), style = Type.Meta)
     Spacer(Modifier.height(Space.S4))
@@ -341,7 +381,7 @@ fun ColumnScope.ModelSheetBody(m: AppModel) {
             Column(Modifier.padding(top = Space.S4)) {
                 BasicText(tr("Thinking", "Myślenie"), style = Type.Label, modifier = Modifier.padding(start = Space.S1, bottom = Space.S2))
                 Segmented(
-                    listOf(tr("Instant", "Od razu"), tr("Low", "Krótko"), tr("Medium", "Średnio"), tr("High", "Dużo"), "Max"),
+                    effortLabels(),
                     Efforts.indexOf(m.effort ?: "medium").coerceAtLeast(0),
                     { m.pickEffort(Efforts[it]) },
                 )

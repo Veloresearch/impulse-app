@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,20 +40,32 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.velocity.impulse.BuildConfig
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Link
@@ -65,7 +80,6 @@ import com.velocity.impulse.ui.components.Group
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.ListRow
 import com.velocity.impulse.ui.components.OnAccent
-import com.velocity.impulse.ui.components.PageTitle
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
 import com.velocity.impulse.ui.components.Sheet
@@ -90,11 +104,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 private const val Source = "https://github.com/Veloresearch/impulse-app"
 
 /** The effort values Impulse stores, in the order the slider shows them. */
 private val Levels = listOf("off", "low", "medium", "high", "max")
+
+/** Text sizes the slider stops at, 85% to 130% in steps of 5. */
+private val Sizes = List(10) { 0.85f + it * 0.05f }
+private val Knob = 26.dp
+private val TitleStyle = Type.Brand.copy(fontSize = 36.sp, lineHeight = 42.sp)
 
 private data class License(val name: String, val license: String, val url: String)
 
@@ -109,27 +129,53 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
     val uri = LocalUriHandler.current
     var signOut by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
+    var clear by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Page(scroll) {
-            PageTitle(tr("Settings", "Ustawienia"), titleModifier = Modifier.morphText(LocalShell.current.pageOrigin, scope))
+            Title(tr("Settings", "Ustawienia"), scope)
             val me = m.me
             val name = me?.name?.ifBlank { null } ?: "Impulse"
             Header(m, name, Modifier.arrive(0)) { Avatar(name, me?.avatar, me?.photo, 64.dp) }
             Group(tr("Chat", "Czat"), Modifier.arrive(1)) {
-                ListRow(tr("Show thinking", "Pokazuj myślenie"), detail = tr("The model's reasoning, folded above each answer", "Rozumowanie modelu, zwinięte nad odpowiedzią")) {
-                    Toggle(m.showThinking, { m.setThinking(it) })
-                }
+                Switch(tr("Show thinking", "Pokazuj myślenie"), tr("The model's reasoning, folded above each answer", "Rozumowanie modelu, zwinięte nad odpowiedzią"), m.showThinking) { m.setThinking(it) }
                 Effort(m)
+                Switch(tr("Enter sends", "Enter wysyła"), tr("Without it, Enter starts a new line", "Bez tego Enter zaczyna nową linię"), m.enterSends) { m.pickEnterSends(it) }
+                Switch(
+                    tr("Web search", "Wyszukiwanie w sieci"),
+                    tr("New chats can search the web and read pages. Each chat can change it.", "Nowe czaty mogą szukać w sieci i czytać strony. Każdy czat może to zmienić."),
+                    m.webDefault,
+                ) { m.pickWebDefault(it) }
+                val tools = m.plugins.size
+                Switch(
+                    tr("Plugins", "Wtyczki"),
+                    when (tools) {
+                        0 -> tr("The computer has no plugins yet", "Komputer nie ma jeszcze wtyczek")
+                        1 -> tr("New chats can use 1 plugin tool from the computer", "Nowe czaty mogą używać 1 narzędzia wtyczek z komputera")
+                        else -> tr("New chats can use $tools plugin tools from the computer", "Nowe czaty mogą używać $tools narzędzi wtyczek z komputera")
+                    },
+                    m.pluginsDefault,
+                ) { m.pickPluginsDefault(it) }
+                Switch(tr("Keep screen on", "Ekran zawsze włączony"), tr("While an answer is being written", "Gdy powstaje odpowiedź"), m.keepAwake) { m.pickKeepAwake(it) }
             }
             Group(tr("Appearance", "Wygląd"), Modifier.arrive(2)) {
                 AccentPicker(m)
-                ListRow(tr("Reduce motion", "Ogranicz ruch"), detail = tr("Cross-fades instead of movement", "Przenikanie zamiast ruchu")) {
-                    Toggle(m.reduceMotion, { m.calmMotion(it) })
-                }
+                TextSize(m)
+                Switch(tr("Reduce motion", "Ogranicz ruch"), tr("Cross-fades instead of movement", "Przenikanie zamiast ruchu"), m.reduceMotion) { m.calmMotion(it) }
+                Switch(tr("Haptics", "Wibracje"), tr("Light taps under your finger as things move", "Lekkie stuknięcia pod palcem, gdy coś się rusza"), m.haptics) { m.pickHaptics(it) }
             }
             Group(tr("Computer", "Komputer"), Modifier.arrive(3)) { ComputerRows(m) { leave = true } }
             Btn(tr("Sign out", "Wyloguj się"), { signOut = true }, Modifier.fillMaxWidth().arrive(3), Variant.Danger, Glyph.SignOut)
-            Group(tr("About", "O aplikacji"), Modifier.arrive(4)) {
+            Group(tr("Storage", "Pamięć"), Modifier.arrive(4)) {
+                val n = m.chats.size
+                Line(
+                    tr("Clear local cache", "Wyczyść pamięć podręczną"),
+                    if (n == 1) tr("1 chat kept on this phone", "1 czat na tym telefonie") else tr("$n chats kept on this phone", "Czaty na tym telefonie: $n"),
+                    { clear = true },
+                ) {
+                    Icon(Glyph.Trash, Ink.Three, size = 20.dp)
+                }
+            }
+            Group(tr("About", "O aplikacji"), Modifier.arrive(5)) {
                 ListRow("Impulse for Android", detail = tr("Version", "Wersja") + " " + BuildConfig.VERSION_NAME)
                 Line(tr("Source code", "Kod źródłowy"), Source.substringAfter("://"), { uri.openUri(Source) }) {
                     Icon(Glyph.Right, Ink.Four, size = 16.dp)
@@ -153,6 +199,15 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
             }
         }
         Leaving(m, signOut, leave) { signOut = false; leave = false }
+        Confirm(
+            clear, { clear = false },
+            tr("Clear local cache?", "Wyczyścić pamięć podręczną?"),
+            tr(
+                "This phone drops its copy of your chats and pulls them again from the computer. Changes the computer hasn't received yet are lost.",
+                "Telefon usunie swoją kopię czatów i pobierze je ponownie z komputera. Zmiany, których komputer jeszcze nie dostał, przepadną.",
+            ),
+            tr("Clear cache", "Wyczyść"),
+        ) { m.clearCache() }
     }
 }
 
@@ -162,7 +217,7 @@ fun ComputerPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
     var leave by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Page(scroll) {
-            PageTitle(tr("Computer", "Komputer"), titleModifier = Modifier.morphText(LocalShell.current.pageOrigin, scope))
+            Title(tr("Computer", "Komputer"), scope)
             Header(m, tr("Your computer", "Twój komputer"), Modifier.arrive(0)) {
                 Box(Modifier.size(64.dp).background(Tone.Raise, Shapes.Tile), contentAlignment = Alignment.Center) {
                     Icon(linkGlyph(m.link), Ink.Two, size = 28.dp)
@@ -176,6 +231,11 @@ fun ComputerPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
         }
         Leaving(m, signOut, leave) { signOut = false; leave = false }
     }
+}
+
+@Composable
+private fun Title(text: String, scope: AnimatedVisibilityScope) {
+    BasicText(text, Modifier.morphText(LocalShell.current.pageOrigin, scope), style = TitleStyle)
 }
 
 /** Who or what the page is about, the computer it reaches, and whether that computer answers. */
@@ -223,7 +283,7 @@ private fun Effort(m: AppModel) {
         tr("Thinks as long as it needs", "Myśli tak długo, jak trzeba"),
     )
     Column(Modifier.fillMaxWidth().background(Tone.Panel).padding(Space.S4)) {
-        BasicText(tr("Thinking effort", "Wysiłek myślenia"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+        BasicText(tr("Default thinking effort", "Domyślny wysiłek myślenia"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
         Roll(notes[at], Type.Meta)
         Spacer(Modifier.height(Space.S3))
         Segmented(
@@ -303,6 +363,127 @@ private fun Swatch(color: Color, on: Boolean, modifier: Modifier, onPick: () -> 
             },
             size = 20.dp,
         )
+    }
+}
+
+/**
+ * Steps from 85% to 130%. The knob follows the finger between stops, ticks at each one and settles
+ * on the nearest when let go; only then is the size kept, so the app does not resize mid-drag.
+ */
+@Composable
+private fun TextSize(m: AppModel) {
+    val view = LocalView.current
+    val accent = LocalAccent.current
+    val calm = LocalShell.current.calm
+    val scope = rememberCoroutineScope()
+    val last = Sizes.lastIndex
+    var at by remember { mutableIntStateOf(((m.textScale - Sizes[0]) / 0.05f).roundToInt().coerceIn(0, last)) }
+    val pos = remember { Animatable(at.toFloat()) }
+    var held by remember { mutableStateOf(false) }
+    val swell by animateFloatAsState(if (held) 1f else 0f, spring(0.6f, 500f), label = "swell")
+    fun follow(x: Float) {
+        scope.launch { if (calm) pos.snapTo(x) else pos.animateTo(x, spring(1f, 1600f)) }
+    }
+    fun settle(i: Int) {
+        at = i
+        if (Sizes[i] != m.textScale) m.pickTextScale(Sizes[i])
+        scope.launch { if (calm) pos.snapTo(i.toFloat()) else pos.animateTo(i.toFloat(), spring(0.85f, 520f)) }
+    }
+    val percent = "${(Sizes[at] * 100).roundToInt()}%"
+    Column(Modifier.fillMaxWidth().background(Tone.Panel).padding(Space.S4)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicText(tr("Text size", "Rozmiar tekstu"), Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+            Roll(percent, Type.Meta, digits = true)
+        }
+        Spacer(Modifier.height(Space.S3))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicText("A", style = Type.Meta.copy(fontSize = 12.sp))
+            Spacer(Modifier.width(Space.S3))
+            Box(
+                Modifier.weight(1f).height(36.dp)
+                    .semantics {
+                        stateDescription = percent
+                        progressBarRangeInfo = ProgressBarRangeInfo(Sizes[at], Sizes[0]..Sizes[last], steps = last - 1)
+                        setProgress { v -> settle(((v - Sizes[0]) / 0.05f).roundToInt().coerceIn(0, last)); true }
+                    }
+                    .pointerInput(calm) {
+                        detectTapGestures { o ->
+                            val k = Knob.toPx()
+                            val i = ((o.x - k / 2) / (size.width - k).coerceAtLeast(1f) * last).roundToInt().coerceIn(0, last)
+                            if (i != at) view.feel(Feel.Tick)
+                            settle(i)
+                        }
+                    }
+                    .pointerInput(calm) {
+                        fun stop(px: Float): Float {
+                            val k = Knob.toPx()
+                            return ((px - k / 2) / (size.width - k).coerceAtLeast(1f) * last).coerceIn(0f, last.toFloat())
+                        }
+                        var finger = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { o ->
+                                held = true
+                                finger = o.x
+                                follow(stop(finger))
+                            },
+                            onDragEnd = { held = false; settle(at) },
+                            onDragCancel = { held = false; settle(at) },
+                        ) { c, dx ->
+                            c.consume()
+                            finger += dx
+                            val x = stop(finger)
+                            follow(x)
+                            val i = x.roundToInt()
+                            if (i != at) {
+                                at = i
+                                view.feel(Feel.Tick)
+                            }
+                        }
+                    }
+                    .drawBehind {
+                        val r = Knob.toPx() / 2
+                        val run = size.width - r * 2
+                        val cy = size.height / 2
+                        val cx = r + run * pos.value / last
+                        val h = 6.dp.toPx()
+                        val corner = CornerRadius(h / 2)
+                        drawRoundRect(Tone.Inset, Offset(0f, cy - h / 2), Size(size.width, h), corner)
+                        drawRoundRect(accent, Offset(0f, cy - h / 2), Size(cx + h / 2, h), corner)
+                        val dot = 1.5.dp.toPx()
+                        for (i in 0..last) {
+                            val tx = r + run * i / last
+                            drawCircle(if (tx <= cx) OnAccent.copy(alpha = 0.4f) else Ink.Four, dot, Offset(tx, cy))
+                        }
+                        val k = r * (1f + 0.14f * swell)
+                        drawCircle(Color.Black.copy(alpha = 0.3f), k, Offset(cx, cy + 1.5.dp.toPx()))
+                        drawCircle(Color.White, k, Offset(cx, cy))
+                    },
+            )
+            Spacer(Modifier.width(Space.S3))
+            BasicText("A", style = Type.Meta.copy(fontSize = 18.sp, color = Ink.Two))
+        }
+        Spacer(Modifier.height(Space.S3))
+        // The phone's own font scale only, so the sample shows the chosen size whatever the app applies around it.
+        val plain = Density(LocalDensity.current.density, LocalConfiguration.current.fontScale)
+        CompositionLocalProvider(LocalDensity provides plain) {
+            val s = Sizes[at]
+            Box(Modifier.fillMaxWidth().height(with(plain) { (Type.Body.lineHeight * Sizes[last] * 2).toDp() })) {
+                BasicText(
+                    tr("This is how an answer reads at this size.", "Tak wygląda odpowiedź w tym rozmiarze."),
+                    style = Type.Body.copy(color = Ink.Two, fontSize = Type.Body.fontSize * s, lineHeight = Type.Body.lineHeight * s),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** A setting that is on or off; the whole row flips it. */
+@Composable
+private fun Switch(title: String, detail: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Line(title, detail, { onChange(!on) }, feel = if (on) Feel.Off else Feel.On) {
+        Toggle(on, onChange)
     }
 }
 

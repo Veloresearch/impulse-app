@@ -6,7 +6,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +29,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
+import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
@@ -103,11 +104,12 @@ fun IconBtn(
     size: Dp = 40.dp,
     enabled: Boolean = true,
     island: Boolean = false,
+    liquid: Float = 1f,
 ) {
     Box(
         modifier.size(size).pressable(
             onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press,
-            depth = 0.88f, enabled = enabled, stretch = true, feelOnDown = island,
+            depth = 0.88f, enabled = enabled, stretch = true, liquid = liquid, feelOnDown = island,
         ),
         contentAlignment = Alignment.Center,
     ) {
@@ -118,16 +120,24 @@ fun IconBtn(
 @Composable
 fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val accent = LocalAccent.current
-    val track by animateColorAsState(if (checked) accent else Tone.Press, tween(Motion.M2), label = "track")
-    val knob by animateDpAsState(if (checked) 20.dp else 0.dp, Motion.travel(), label = "knob")
+    val calm = LocalReduceMotion.current
+    val track = animateColorAsState(if (checked) accent else Tone.Press, tween(Motion.M2), label = "track")
+    val knob = animateFloatAsState(if (checked) 1f else 0f, Motion.travel(), label = "knob")
+    val blob = rememberLiquid(0.6f)
     Box(
         modifier
             .size(51.dp, 31.dp)
-            .pressable({ onChange(!checked) }, depth = 0.92f, feel = if (checked) Feel.Off else Feel.On, role = Role.Switch, stretch = true)
-            .background(track, CircleShape)
+            .then(if (calm) Modifier else Modifier.liquidTouch(blob))
+            .pressable({ onChange(!checked) }, depth = 1f, feel = if (checked) Feel.Off else Feel.On, role = Role.Switch)
+            .drawBehind { drawRoundRect(track.value, cornerRadius = CornerRadius(size.height / 2f)) }
             .padding(2.dp),
     ) {
-        Box(Modifier.offset(x = knob).size(27.dp).background(Color.White, CircleShape))
+        Box(
+            Modifier
+                .graphicsLayer { translationX = knob.value * 20.dp.toPx() }
+                .size(27.dp)
+                .liquidShape(blob, CircleShape) { Color.White },
+        )
     }
 }
 

@@ -5,16 +5,21 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class ImpulseError(message: String, val code: String? = null, val status: Int = 0) : Exception(message)
 
@@ -33,6 +38,15 @@ sealed interface Delta {
     data class Text(val text: String) : Delta
     data class Queued(val ahead: Int) : Delta
     data class Done(val receipt: JSONObject) : Delta
+
+    /** A tool call as the model writes it, raw. */
+    data class ToolText(val text: String) : Delta
+
+    /** The calls the reply made, parsed by the service (OpenAI shape), just before [Done]. */
+    data class ToolCalls(val calls: JSONArray) : Delta
+
+    /** A call the service could not read, whole. */
+    data class ToolUnparsed(val raw: String) : Delta
 }
 
 /**
@@ -65,10 +79,27 @@ class Impulse(private val server: Server, private val token: String? = null) {
         }
     }
 
-    private suspend fun call(path: String, body: JSONObject? = null, client: OkHttpClient = quick): JSONObject = withContext(Dispatchers.IO) {
+    /** Cancelling the caller cancels the request, so Stop never waits on a slow search or plugin. */
+    private suspend fun call(path: String, body: JSONObject? = null, client: OkHttpClient = quick): JSONObject {
         val r = request(path).apply { if (body != null) post(body.toString().toRequestBody(JSON)) }.build()
+        val c = client.newCall(r)
+        val resp = try {
+            suspendCancellableCoroutine<Response> { cont ->
+                cont.invokeOnCancellation { c.cancel() }
+                c.enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+                    override fun onResponse(call: Call, response: Response) = cont.resume(response)
+                })
+            }
+        } catch (e: IOException) {
+            throw ImpulseError("Cannot reach Impulse at ${base.substringAfter("://")}.")
+        }
+        return withContext(Dispatchers.IO) { read(resp) }
+    }
+
+    private fun read(response: Response): JSONObject =
         try {
-            client.newCall(r).execute().use { resp ->
+            response.use { resp ->
                 val text = resp.body?.string().orEmpty()
                 val json = runCatching { JSONObject(text) }.getOrNull()
                 if (!resp.isSuccessful) {
@@ -81,7 +112,6 @@ class Impulse(private val server: Server, private val token: String? = null) {
         } catch (e: IOException) {
             throw ImpulseError("Cannot reach Impulse at ${base.substringAfter("://")}.")
         }
-    }
 
     suspend fun profiles(): List<Profile> = call("/api/v2/profiles").optJSONArray("profiles").objects().map {
         Profile(
@@ -153,17 +183,43 @@ class Impulse(private val server: Server, private val token: String? = null) {
 
     suspend fun push(chats: JSONArray): JSONObject = call("/api/v2/chats/push", JSONObject().put("chats", chats))
 
+    /** The service's web search: up to six results, the top [read] of them read in full. */
+    suspend fun webSearch(q: String, read: Int): List<JSONObject> =
+        call("/api/v2/web/search", JSONObject().put("q", q).put("max", 6).put("read", read), long).optJSONArray("results").objects()
+
+    /** One public page as readable text: `{url, title, text}`. */
+    suspend fun webPage(url: String, max: Int = 3500): JSONObject = call("/api/v2/web/page", JSONObject().put("url", url).put("max", max), long)
+
+    /** Every tool of every switched-on plugin; [refresh] wakes a plugin that never said what it offers. */
+    suspend fun mcpTools(refresh: Boolean): List<JSONObject> = call("/api/v2/mcp/tools", JSONObject().put("refresh", refresh), long).optJSONArray("tools").objects()
+
+    suspend fun mcpCall(name: String, args: JSONObject, timeoutMs: Int = 60_000): JSONObject =
+        call("/api/v2/mcp/call", JSONObject().put("name", name).put("arguments", args).put("timeout_ms", timeoutMs), long)
+
     /**
-     * One turn on the panel's own endpoint: words, the model's thinking, the queue, and the receipt
-     * at the end. [actor] is the chat's id, so each chat keeps its own memory; [store] answers from
-     * a named context. Cancelling the collector cancels the request.
+     * One turn on the panel's own endpoint: words, the model's thinking, the queue, the calls it
+     * made when [tools] were offered, and the receipt at the end. [actor] is the chat's id, so each
+     * chat keeps its own memory; [store] answers from a named context. Cancelling the collector
+     * cancels the request.
      */
-    fun turn(messages: List<Pair<String, String>>, actor: String, store: String?, effort: String?, images: List<String> = emptyList()): Flow<Delta> = callbackFlow {
+    fun turn(
+        messages: List<JSONObject>,
+        actor: String,
+        store: String?,
+        effort: String?,
+        images: List<String> = emptyList(),
+        tools: JSONArray? = null,
+        temperature: Double? = null,
+        maxTokens: Int? = null,
+    ): Flow<Delta> = callbackFlow {
         val body = JSONObject()
-            .put("messages", JSONArray(messages.map { (role, content) -> JSONObject().put("role", role).put("content", content) }))
+            .put("messages", JSONArray(messages))
             .put("actor", actor)
         if (store != null) body.put("store", store)
         if (images.isNotEmpty()) body.put("images", JSONArray(images))
+        if (tools != null && tools.length() > 0) body.put("tools", tools)
+        if (temperature != null) body.put("temperature", temperature)
+        if (maxTokens != null) body.put("max_tokens", maxTokens)
         when (effort) {
             null -> {}
             "off" -> body.put("thinking", false)
@@ -189,6 +245,9 @@ class Impulse(private val server: Server, private val token: String? = null) {
                     when {
                         ev.opt("delta") is String -> trySend(Delta.Text(ev.getString("delta")))
                         ev.opt("reasoning") is String -> trySend(Delta.Thinking(ev.getString("reasoning")))
+                        ev.opt("tool_delta") is String -> trySend(Delta.ToolText(ev.getString("tool_delta")))
+                        ev.opt("tool_calls") is JSONArray -> trySend(Delta.ToolCalls(ev.getJSONArray("tool_calls")))
+                        ev.opt("tool_unparsed") is String -> trySend(Delta.ToolUnparsed(ev.getString("tool_unparsed")))
                         ev.has("queued") -> trySend(Delta.Queued(ev.optInt("queued")))
                         ev.has("done") -> {
                             trySend(Delta.Done(ev.optJSONObject("done") ?: JSONObject()))
@@ -216,6 +275,7 @@ class Impulse(private val server: Server, private val token: String? = null) {
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
         private val slow = quick.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
+        private val long = quick.newBuilder().readTimeout(120, TimeUnit.SECONDS).build()
 
         /** "192.168.1.20" → http://192.168.1.20:11500. A scheme or a port someone typed is kept. */
         fun normalize(raw: String): String {

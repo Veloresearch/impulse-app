@@ -1,7 +1,29 @@
 package com.velocity.impulse.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
+import com.velocity.impulse.R
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
@@ -122,8 +144,6 @@ private class Places {
     val titles = HashMap<String, LayoutCoordinates>()
 }
 
-private val ActionsHeight = 108.dp
-
 private fun sections(chats: List<Chat>): List<Pair<String, List<Chat>>> {
     val z = java.time.ZoneId.systemDefault()
     val today = java.time.LocalDate.now(z)
@@ -170,6 +190,11 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
     var heldRect by remember { mutableStateOf(Rect.Zero) }
     val wash = remember { Animatable(0f) }
     val washing by remember { derivedStateOf { wash.value > 0f } }
+    var actionsH by remember { mutableIntStateOf(0) }
+    var renaming by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(TextFieldValue()) }
+    val nameFocus = remember { FocusRequester() }
+    val ime = WindowInsets.ime
 
     val hay = remember(m.chats) { lazy { m.chats.associate { c -> c.id to c.messages.joinToString(" ") { it.text } } } }
     val gone = pending.toList()
@@ -223,8 +248,20 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
         held = c
     }
     fun drop() {
+        if (renaming) focus.clearFocus()
+        renaming = false
         held = null
     }
+    fun rename(c: Chat) {
+        if (name.text.isBlank()) return
+        if (name.text.trim() != c.title) {
+            m.rename(c.id, name.text)
+            view.feel(Feel.Confirm)
+        }
+        drop()
+    }
+    LaunchedEffect(renaming) { if (renaming) nameFocus.requestFocus() }
+    LaunchedEffect(Unit) { snapshotFlow { shell.drawer.targetValue < 1f }.collect { if (it) drop() } }
     BackHandler(held != null) { drop() }
 
     Box(modifier.fillMaxSize().onPlaced { places.root = it }) {
@@ -353,31 +390,52 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
         val rect = heldRect
         val w = with(density) { rect.width.toDp() }
         val h = with(density) { rect.height.toDp() }
+        val rootH = places.root?.size?.height ?: 0
+        val above = rect.bottom > 0.7f * rootH
+        // While renaming, the row and its island ride up together so the keyboard never covers them.
+        val rise: Density.() -> Int = {
+            if (!renaming) 0 else {
+                val room = rootH - ime.getBottom(this) - 8.dp.roundToPx()
+                val bottom = rect.bottom.roundToInt() + if (above) 0 else 8.dp.roundToPx() + actionsH
+                (room - bottom).coerceAtMost(0)
+            }
+        }
         AnimatedVisibility(
             held != null,
-            Modifier.offset { IntOffset(rect.left.roundToInt(), rect.top.roundToInt()) }.size(w, h),
+            Modifier.offset { IntOffset(rect.left.roundToInt(), rect.top.roundToInt() + rise()) }.size(w, h),
             enter = fadeIn(tween(Motion.M1)),
             exit = fadeOut(tween(Motion.M1)),
         ) {
             val c = lifted ?: return@AnimatedVisibility
+            val current = c.id == m.current
             Row(
                 Modifier.fillMaxSize()
                     .shadow(12.dp, Shapes.ControlLg, ambientColor = Color.Black.copy(alpha = 0.4f))
                     .background(Tone.Raise, Shapes.ControlLg)
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-            ) { ChatLine(c, c.id == m.current) }
+            ) {
+                if (!renaming) ChatLine(c, current)
+                else BasicTextField(
+                    name,
+                    { name = it.copy(text = it.text.replace('\n', ' ')) },
+                    Modifier.weight(1f).focusRequester(nameFocus),
+                    textStyle = Type.Body.copy(color = Ink.One, fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal),
+                    cursorBrush = SolidColor(LocalAccent.current),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { rename(c) }),
+                )
+            }
         }
 
-        val rootH = places.root?.size?.height ?: 0
-        val above = rect.bottom > 0.7f * rootH
         AnimatedVisibility(
             held != null,
             Modifier
                 .offset {
                     val gap = 8.dp.roundToPx()
-                    val y = if (above) rect.top.roundToInt() - gap - ActionsHeight.roundToPx() else rect.bottom.roundToInt() + gap
-                    IntOffset(rect.left.roundToInt(), y)
+                    val y = if (above) rect.top.roundToInt() - gap - actionsH else rect.bottom.roundToInt() + gap
+                    IntOffset(rect.left.roundToInt(), y + rise())
                 }
                 .width(max(200.dp, w * 0.7f)),
             enter = if (calm) fadeIn(tween(Motion.M1)) else
@@ -386,16 +444,42 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                 scaleOut(tween(140, easing = Motion.Leave), 0.96f) + fadeOut(tween(140, easing = Motion.Leave)),
         ) {
             val c = lifted ?: return@AnimatedVisibility
-            Column(Modifier.fillMaxWidth().height(ActionsHeight).glass(haze, Shapes.Panel).padding(6.dp)) {
-                Action(0, Glyph.Pin, if (c.pinned) tr("Unpin", "Odepnij") else tr("Pin", "Przypnij"), Ink.One, calm) {
-                    view.feel(Feel.Confirm)
-                    m.pin(c.id)
-                    drop()
-                }
-                Action(1, Glyph.Trash, tr("Delete", "Usuń"), Signal.Err, calm) {
-                    view.feel(Feel.Tap)
-                    pending += c.id
-                    drop()
+            val island = this
+            AnimatedContent(
+                renaming,
+                Modifier.fillMaxWidth().onSizeChanged { actionsH = it.height }.glass(haze, Shapes.Panel),
+                transitionSpec = {
+                    fadeIn(tween(Motion.M2, delayMillis = 60)) togetherWith fadeOut(tween(Motion.M1)) using
+                        SizeTransform(clip = true) { _, _ -> spring(1f, 520f, IntSize.VisibilityThreshold) }
+                },
+                label = "actions",
+            ) { naming ->
+                if (!naming) Column(Modifier.fillMaxWidth().padding(6.dp)) {
+                    with(island) {
+                        Action(0, painterResource(R.drawable.ph_pencil_simple_bold), tr("Rename", "Zmień nazwę"), Ink.One, calm) {
+                            view.feel(Feel.Tap)
+                            name = c.title.let { TextFieldValue(it, TextRange(0, it.length)) }
+                            renaming = true
+                        }
+                        Action(1, painterResource(Glyph.Pin.res()), if (c.pinned) tr("Unpin", "Odepnij") else tr("Pin", "Przypnij"), Ink.One, calm) {
+                            view.feel(Feel.Confirm)
+                            m.pin(c.id)
+                            drop()
+                        }
+                        Action(2, painterResource(Glyph.Copy.res()), tr("Duplicate", "Duplikuj"), Ink.One, calm) {
+                            view.feel(Feel.Confirm)
+                            m.duplicate(c.id)
+                            drop()
+                        }
+                        Action(3, painterResource(Glyph.Trash.res()), tr("Delete", "Usuń"), Signal.Err, calm) {
+                            view.feel(Feel.Tap)
+                            pending += c.id
+                            drop()
+                        }
+                    }
+                } else Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Btn(tr("Cancel", "Anuluj"), ::drop, Modifier.weight(1f), variant = Variant.Quiet, height = 44.dp)
+                    Btn(tr("Save", "Zapisz"), { rename(c) }, Modifier.weight(1f), variant = Variant.Primary, height = 44.dp, enabled = name.text.isNotBlank())
                 }
             }
         }
@@ -520,7 +604,7 @@ private fun EmptyNote(searching: Boolean, calm: Boolean, modifier: Modifier) {
 @Composable
 private fun AnimatedVisibilityScope.Action(
     index: Int,
-    glyph: Glyph,
+    icon: Painter,
     label: String,
     tint: Color,
     calm: Boolean,
@@ -542,7 +626,7 @@ private fun AnimatedVisibilityScope.Action(
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(glyph, tint, size = 18.dp)
+        Image(icon, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(tint))
         Spacer(Modifier.width(12.dp))
         BasicText(label, style = Type.Body.copy(color = tint, fontWeight = FontWeight.Medium))
     }

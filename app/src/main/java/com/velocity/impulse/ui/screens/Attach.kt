@@ -129,7 +129,7 @@ fun AddMenu(open: Boolean, calm: Boolean, onCamera: () -> Unit, onPhotos: () -> 
                             exit = ExitTransition.None,
                         )
                         .heightIn(min = 52.dp)
-                        .pressable(go, Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f, stretch = true)
+                        .pressable(go, Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f)
                         .padding(horizontal = Space.S3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

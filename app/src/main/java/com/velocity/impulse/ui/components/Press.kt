@@ -32,7 +32,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
 import kotlinx.coroutines.launch
@@ -45,9 +44,10 @@ internal fun rubber(d: Float, reach: Float) = d * reach / (abs(d) + reach)
 /**
  * Press feedback shared by every tappable thing. It compresses to [depth] and springs back, the
  * fill deepens from [rest] to [pressed] and [feel] goes to the hand. With [tilt] (degrees) a card
- * leans in 3D toward the finger and follows it while it is down. With [stretch], a button or a
- * pill also stretches toward the finger and wobbles home when let go. A scroll that takes the
- * gesture releases both at once.
+ * leans in 3D toward the finger and follows it while it is down. A control with a [shape] and
+ * [stretch] is a drop of liquid instead (see [Liquid]): its fill swells, follows the finger and
+ * wobbles home while the content lags behind it; [liquid] says how much. A scroll that takes the
+ * gesture releases everything at once.
  *
  * [feelOnDown] answers the touch itself rather than the release, for island controls. A control
  * with [blocked] looks unavailable but still takes the tap: it shakes, refuses, and calls
@@ -64,6 +64,7 @@ fun Modifier.pressable(
     feel: Feel? = Feel.Tap,
     role: Role = Role.Button,
     stretch: Boolean = false,
+    liquid: Float = 1f,
     tilt: Float = 0f,
     feelOnDown: Boolean = false,
     blocked: (() -> Unit)? = null,
@@ -73,7 +74,7 @@ fun Modifier.pressable(
     val source = remember { MutableInteractionSource() }
     val down by source.collectIsPressedAsState()
     val sink = if (depth >= 0.98f) spring<Float>(1f, 700f) else spring<Float>(0.6f, 500f)
-    val scale by animateFloatAsState(if (down && live && depth != 1f) depth else 1f, sink, label = "press")
+    val scale = animateFloatAsState(if (down && live && depth != 1f) depth else 1f, sink, label = "press")
     val fill = animateColorAsState(
         if (down && live) pressed else rest,
         tween(if (down) Motion.M1 else Motion.M2, easing = Motion.Standard),
@@ -81,10 +82,18 @@ fun Modifier.pressable(
     )
     val view = LocalView.current
     val calm = LocalReduceMotion.current
-    val pull = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
+    val blob = rememberLiquid(liquid)
     val lean = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
     val scope = rememberCoroutineScope()
     var refused by remember { mutableIntStateOf(0) }
+    val moving = stretch && live && !calm
+    val flow = moving && shape != null
+    val painted = shape != null && (rest != Color.Transparent || pressed != Color.Transparent)
+    val fade = when {
+        blocked != null -> 0.55f
+        enabled -> 1f
+        else -> 0.45f
+    }
 
     var m = this
     if (feelOnDown && enabled && blocked == null) m = m.pointerInput(feel) {
@@ -93,53 +102,55 @@ fun Modifier.pressable(
             view.feel(feel ?: Feel.Tap)
         }
     }
-    if ((stretch || tilt > 0f) && live && !calm) m = m.pointerInput(stretch, tilt) {
-        val reach = 28.dp.toPx()
+    if (moving) m = m.liquidTouch(blob)
+    if (tilt > 0f && live && !calm) m = m.pointerInput(tilt) {
         fun aim(at: Offset) = Offset(
             ((at.x / size.width.coerceAtLeast(1)) * 2f - 1f).coerceIn(-1f, 1f),
             ((at.y / size.height.coerceAtLeast(1)) * 2f - 1f).coerceIn(-1f, 1f),
         )
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
-            if (tilt > 0f) scope.launch { lean.animateTo(aim(first.position), spring(dampingRatio = 0.7f, stiffness = 600f)) }
+            scope.launch { lean.animateTo(aim(first.position), spring(dampingRatio = 0.7f, stiffness = 600f)) }
             while (true) {
-                val e = awaitPointerEvent(PointerEventPass.Final)
-                val c = e.changes.firstOrNull { it.id == first.id } ?: break
+                val c = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == first.id } ?: break
                 if (!c.pressed || c.isConsumed) break
-                if (stretch) {
-                    val d = c.position - first.position
-                    scope.launch { pull.snapTo(Offset(rubber(d.x, reach), rubber(d.y, reach))) }
-                }
-                if (tilt > 0f) scope.launch { lean.snapTo(aim(c.position)) }
+                scope.launch { lean.snapTo(aim(c.position)) }
             }
-            scope.launch { pull.animateTo(Offset.Zero, spring(dampingRatio = 0.38f, stiffness = 380f)) }
             scope.launch { lean.animateTo(Offset.Zero, spring(dampingRatio = 0.62f, stiffness = 300f)) }
         }
     }
     if (blocked != null) m = m.shake(refused)
-    m = m.graphicsLayer {
-        val p = pull.value
-        val w = size.width.coerceAtLeast(1f)
-        val h = size.height.coerceAtLeast(1f)
-        val sx = 1f + abs(p.x) / w * 0.9f
-        val sy = 1f + abs(p.y) / h * 0.9f
-        scaleX = scale * sx / sqrt(sy)
-        scaleY = scale * sy / sqrt(sx)
-        translationX = p.x * 0.45f
-        translationY = p.y * 0.45f
-        rotationY = lean.value.x * tilt
-        rotationX = -lean.value.y * tilt
-        cameraDistance = 14f * density
-        alpha = when {
-            blocked != null -> 0.55f
-            enabled -> 1f
-            else -> 0.45f
+    if (flow) {
+        if (painted) m = m.liquidShape(blob, shape!!) { fill.value.let { it.copy(alpha = it.alpha * fade) } }
+        m = m.graphicsLayer {
+            translationX = blob.lag.value.x
+            translationY = blob.lag.value.y
+            rotationY = lean.value.x * tilt
+            rotationX = -lean.value.y * tilt
+            cameraDistance = 14f * density
+            alpha = fade
         }
-    }
-    // Drawn, not composed: the fill fades on every frame of a press.
-    if (shape != null && (rest != Color.Transparent || pressed != Color.Transparent)) m = m.drawWithCache {
-        val outline = shape.createOutline(size, layoutDirection, this)
-        onDrawBehind { drawOutline(outline, fill.value) }
+    } else {
+        m = m.graphicsLayer {
+            val p = blob.pull.value
+            val w = size.width.coerceAtLeast(1f)
+            val h = size.height.coerceAtLeast(1f)
+            val sx = 1f + abs(p.x) / w * 0.9f
+            val sy = 1f + abs(p.y) / h * 0.9f
+            scaleX = scale.value * sx / sqrt(sy)
+            scaleY = scale.value * sy / sqrt(sx)
+            translationX = p.x * 0.45f
+            translationY = p.y * 0.45f
+            rotationY = lean.value.x * tilt
+            rotationX = -lean.value.y * tilt
+            cameraDistance = 14f * density
+            alpha = fade
+        }
+        // Drawn, not composed: the fill fades on every frame of a press.
+        if (painted) m = m.drawWithCache {
+            val outline = shape!!.createOutline(size, layoutDirection, this)
+            onDrawBehind { drawOutline(outline, fill.value) }
+        }
     }
     m.combinedClickable(
         interactionSource = source,

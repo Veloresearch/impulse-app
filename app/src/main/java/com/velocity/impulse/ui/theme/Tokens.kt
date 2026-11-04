@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontVariation
 import com.velocity.impulse.R
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -133,4 +134,14 @@ object Type {
     val Meta = base.copy(fontFamily = InterText, fontSize = 13.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp, color = Ink.Three)
     val Label = base.copy(fontFamily = InterText, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Ink.Three)
     val Mono = base.copy(fontFamily = JetBrainsMono, fontSize = 13.sp, lineHeight = 19.sp, color = Ink.Two)
+
+    /** The wordmark face at [size]; tracking loosens as it shrinks so small titles stay legible. */
+    fun brand(size: TextUnit): TextStyle {
+        val t = ((size.value - 16f) / 28f).coerceIn(0f, 1f)
+        return Brand.copy(fontSize = size, lineHeight = size * 1.15f, letterSpacing = (-(0.012f + 0.023f * t)).em)
+    }
+
+    val BrandHero = brand(38.sp)
+    val BrandTitle = brand(30.sp)
+    val BrandSection = brand(22.sp)
 }

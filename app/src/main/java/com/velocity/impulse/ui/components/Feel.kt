@@ -28,12 +28,19 @@ enum class Feel(val v34: Int, val v30: Int, val base: Int) {
     Hold(LONG_PRESS, LONG_PRESS, LONG_PRESS),
     On(TOGGLE_ON, VIRTUAL_KEY, VIRTUAL_KEY),
     Off(TOGGLE_OFF, CLOCK_TICK, CLOCK_TICK),
+    ;
+
+    companion object {
+        /** Off when the owner turned haptics off; every [feel] respects it. */
+        var enabled = true
+    }
 }
 
 private var lastFelt = 0L
 
 /** Plays [f], dropping it when another one went out less than 60 ms ago so ticks never buzz. */
 fun View.feel(f: Feel) {
+    if (!Feel.enabled) return
     val now = SystemClock.uptimeMillis()
     if (now - lastFelt < 60) return
     lastFelt = now

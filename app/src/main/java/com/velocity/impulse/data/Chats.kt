@@ -14,6 +14,13 @@ class Message(val raw: JSONObject) {
     val at: Long get() = raw.optLong("at")
     val error: String? get() = raw.optString("error").ifBlank { null }
 
+    /** The pages the answer cites, as (title, url); its [n] is the n-th. */
+    val sources: List<Pair<String, String>> get() = raw.optJSONArray("sources").objects().map { it.optString("title") to it.optString("url") }
+    val steps: List<Step> get() = raw.optJSONArray("appSteps").objects().map {
+        Step(it.optString("tool"), it.optString("label"), it.optString("detail").ifBlank { null }.takeIf { d -> d != "null" }, it.optBoolean("ok", true))
+    }
+    val receipt: JSONObject? get() = raw.optJSONObject("receipt")
+
     companion object {
         fun of(role: String, text: String) = Message(
             JSONObject().put("id", newId("m")).put("role", role).put("text", text).put("at", System.currentTimeMillis()),
@@ -32,6 +39,15 @@ class Chat(val raw: JSONObject) {
     /** The personality this chat answers in; none unless chosen in its details. */
     val persona: String? get() = raw.optString("persona").ifBlank { null }.takeIf { it != "null" }
     val messages: List<Message> get() = raw.optJSONArray("messages").objects().map(::Message)
+
+    val systemPrompt: String? get() = (raw.opt("systemPrompt") as? String)?.ifBlank { null }
+    val temperature: Double? get() = (raw.optJSONObject("options")?.opt("temperature") as? Number)?.toDouble()
+    val maxTokens: Int? get() = (raw.optJSONObject("options")?.opt("max_tokens") as? Number)?.toInt()
+
+    /** Web search in this chat; null follows the app's default. */
+    val web: Boolean? get() = raw.optJSONObject("appTools")?.opt("web") as? Boolean
+    val plugins: Boolean? get() = raw.optJSONObject("appTools")?.opt("plugins") as? Boolean
+    val titled: Boolean get() = raw.optBoolean("titled")
 
     fun edit(block: JSONObject.() -> Unit): Chat = Chat(JSONObject(raw.toString()).apply(block).put("updatedAt", System.currentTimeMillis()))
 
@@ -54,6 +70,11 @@ class Chat(val raw: JSONObject) {
             )
         }
     }
+}
+
+/** One thing the model did with a tool on the way to an answer, e.g. ("web_search", "Searched the web", query, true). */
+data class Step(val tool: String, val label: String, val detail: String?, val ok: Boolean) {
+    fun json(): JSONObject = JSONObject().put("tool", tool).put("label", label).put("detail", detail ?: JSONObject.NULL).put("ok", ok)
 }
 
 /** Ids the way the panel makes them: a prefix, the time in base 36, and five random characters. */

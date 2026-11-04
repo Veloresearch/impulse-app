@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -100,7 +101,7 @@ private data class Spot(val l: Float, val t: Float, val r: Float, val b: Float)
  * an Impulse code seals the frame in the accent with a check, anything else shakes it red.
  */
 @Composable
-fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier) {
+fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier, shape: Shape = Shapes.Panel) {
     val ctx = LocalContext.current
     var allowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
@@ -141,7 +142,7 @@ fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(0.92f).clip(Shapes.Panel).background(Tone.Inset), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().aspectRatio(0.92f).clip(shape).background(Tone.Inset), contentAlignment = Alignment.Center) {
             if (allowed && awake) {
                 Box(Modifier.fillMaxSize().graphicsLayer { alpha = live }) {
                     Camera(
@@ -165,7 +166,15 @@ fun Scanner(onCode: (String) -> Boolean, modifier: Modifier = Modifier) {
                 }
             }
         }
-        Roll(if (rejected != null) tr("That code isn't from Impulse", "To nie jest kod z Impulse") else "", Type.Meta)
+        Roll(
+            when {
+                verdict == 1 -> tr("Got it", "Mam")
+                rejected != null -> tr("That code isn't from Impulse", "To nie jest kod z Impulse")
+                else -> tr("Hold the phone over the code", "Skieruj telefon na kod")
+            },
+            Type.Meta,
+            Modifier.padding(bottom = Space.S1),
+        )
     }
 }
 
@@ -176,7 +185,15 @@ private fun Camera(onSpot: (Spot?) -> Unit, onCode: (String) -> Unit, paused: Bo
     val hold = rememberUpdatedState(paused)
     val spotted = rememberUpdatedState(onSpot)
     val decoded = rememberUpdatedState(onCode)
-    DisposableEffect(Unit) { onDispose { worker.shutdown() } }
+    // The camera is bound to the activity, so closing the scanner must release it by hand.
+    val bound = remember { object { var provider: ProcessCameraProvider? = null; var gone = false } }
+    DisposableEffect(Unit) {
+        onDispose {
+            bound.gone = true
+            bound.provider?.unbindAll()
+            worker.shutdown()
+        }
+    }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -191,7 +208,8 @@ private fun Camera(onSpot: (Spot?) -> Unit, onCode: (String) -> Unit, paused: Bo
             var lastSeen = 0L
             val future = ProcessCameraProvider.getInstance(c)
             future.addListener({
-                val provider = future.get()
+                if (bound.gone) return@addListener
+                val provider = future.get().also { bound.provider = it }
                 val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                 val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
                 analysis.setAnalyzer(worker) { img ->

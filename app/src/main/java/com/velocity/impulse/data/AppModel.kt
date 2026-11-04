@@ -32,6 +32,10 @@ data class Live(
     val queued: Int = 0,
     val thoughtAt: Long = 0L,
     val textAt: Long = 0L,
+    /** What a tool is doing now, e.g. "Searching: best pizza in Krakow". */
+    val step: String? = null,
+    /** Pages found or read so far, as (title, url). */
+    val links: List<Pair<String, String>> = emptyList(),
 )
 
 class AppModel(app: Application) : AndroidViewModel(app) {
@@ -60,6 +64,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var showThinking by mutableStateOf(prefs.getBoolean("thinking", true))
         private set
     var reduceMotion by mutableStateOf(prefs.getBoolean("reduce_motion", false))
+        private set
+    var textScale by mutableStateOf(prefs.getFloat("text_scale", 1f).coerceIn(0.85f, 1.3f))
+        private set
+    var haptics by mutableStateOf(prefs.getBoolean("haptics", true))
+        private set
+    /** The screen stays on while an answer streams. */
+    var keepAwake by mutableStateOf(prefs.getBoolean("keep_awake", true))
+        private set
+    var enterSends by mutableStateOf(prefs.getBoolean("enter_sends", false))
+        private set
+    var webDefault by mutableStateOf(prefs.getBoolean("web_default", true))
+        private set
+    var pluginsDefault by mutableStateOf(prefs.getBoolean("plugins_default", true))
+        private set
+
+    /** Plugin tools the computer offers, by name. */
+    var plugins by mutableStateOf<List<String>>(emptyList())
         private set
 
     var profiles by mutableStateOf<List<Profile>>(emptyList())
@@ -205,6 +226,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         runCatching { contexts = api().contexts().filterNot { it.name.startsWith("chat-") || it.name == "vls-titles" } }
         runCatching { readPrefs(api().prefs()) }
         runCatching { api().me()?.let { remember(it) } }
+        runCatching { plugins = api().mcpTools(false).map { it.optString("name") }.filter { it.isNotBlank() } }
     }
 
     private fun remember(p: Profile) {
@@ -350,6 +372,49 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("effort", e).apply()
     }
 
+    fun pickTextScale(v: Float) {
+        textScale = v.coerceIn(0.85f, 1.3f)
+        prefs.edit().putFloat("text_scale", textScale).apply()
+    }
+
+    fun pickHaptics(on: Boolean) {
+        haptics = on
+        prefs.edit().putBoolean("haptics", on).apply()
+    }
+
+    fun pickKeepAwake(on: Boolean) {
+        keepAwake = on
+        prefs.edit().putBoolean("keep_awake", on).apply()
+    }
+
+    fun pickEnterSends(on: Boolean) {
+        enterSends = on
+        prefs.edit().putBoolean("enter_sends", on).apply()
+    }
+
+    fun pickWebDefault(on: Boolean) {
+        webDefault = on
+        prefs.edit().putBoolean("web_default", on).apply()
+    }
+
+    fun pickPluginsDefault(on: Boolean) {
+        pluginsDefault = on
+        prefs.edit().putBoolean("plugins_default", on).apply()
+    }
+
+    /** Drops the phone's copy of the chats and pulls them all again; the sign-in stays. */
+    fun clearCache() {
+        stop()
+        current = null
+        viewModelScope.launch {
+            syncing.withLock {
+                synchronized(cache) { cache.forget() }
+                chats = emptyList()
+            }
+            sync()
+        }
+    }
+
     // ── chats ───────────────────────────────────────────────────────────────────────────────
 
     fun newChat() {
@@ -380,6 +445,49 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         chats.firstOrNull { it.id == id }?.let { c -> changed(c.edit { put("pinned", !c.pinned) }) }
         pushSoon()
     }
+
+    /** Edits a chat's session record, keeps it and sends it to the computer. */
+    fun editChat(id: String, block: JSONObject.() -> Unit) {
+        chats.firstOrNull { it.id == id }?.let { changed(it.edit(block)) }
+        pushSoon()
+    }
+
+    fun rename(id: String, title: String) {
+        val t = title.trim().ifEmpty { return }
+        editChat(id) { put("title", t).put("titled", true) }
+    }
+
+    fun duplicate(id: String): String? {
+        val c = chats.firstOrNull { it.id == id } ?: return null
+        val now = System.currentTimeMillis()
+        val copy = Chat(JSONObject(c.raw.toString()).put("id", newId("cs")).put("createdAt", now).put("updatedAt", now).put("pinned", false))
+        changed(copy)
+        pushSoon()
+        return copy.id
+    }
+
+    private fun editCurrent(block: JSONObject.() -> Unit) {
+        current?.let { editChat(it, block) }
+    }
+
+    private fun JSONObject.setIn(group: String, key: String, value: Any?) {
+        val o = optJSONObject(group) ?: JSONObject()
+        if (value == null) o.remove(key) else o.put(key, value)
+        put(group, o)
+    }
+
+    fun setSystemPrompt(text: String?) = editCurrent {
+        val t = text?.trim()
+        if (t.isNullOrEmpty()) remove("systemPrompt") else put("systemPrompt", t)
+    }
+
+    fun setTemperature(v: Double?) = editCurrent { setIn("options", "temperature", v) }
+
+    fun setMaxTokens(n: Int?) = editCurrent { setIn("options", "max_tokens", n) }
+
+    fun setChatWeb(on: Boolean?) = editCurrent { setIn("appTools", "web", on) }
+
+    fun setChatPlugins(on: Boolean?) = editCurrent { setIn("appTools", "plugins", on) }
 
     /**
      * Sends a question with what was attached to it. Pictures go to the model to look at; a text
@@ -426,30 +534,135 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         answer = viewModelScope.launch {
             var receipt: JSONObject? = null
             var failed: String? = null
+            var tools: Tools? = null
             try {
-                val voice = Personas.firstOrNull { it.id == persona }?.let { listOf("system" to it.prompt) }.orEmpty()
-                val talk = voice + asked.map { it.role to it.text }.let { t -> if (lastText != null) t.dropLast(1) + ("user" to lastText) else t }
-                api().turn(talk, "chat:$chatId", store, effort, images).collect { d ->
-                    val l = live ?: return@collect
-                    val now = System.currentTimeMillis()
-                    live = when (d) {
-                        is Delta.Text -> l.copy(text = l.text + d.text, queued = 0, textAt = l.textAt.takeIf { it > 0 } ?: now)
-                        is Delta.Thinking -> l.copy(thought = l.thought + d.text, queued = 0, thoughtAt = l.thoughtAt.takeIf { it > 0 } ?: now)
-                        is Delta.Queued -> l.copy(queued = d.ahead)
-                        is Delta.Done -> l.also { receipt = d.receipt }
-                    }
-                }
+                val c = chats.firstOrNull { it.id == chatId }
+                val a = api()
+                val offered = if (c?.plugins ?: pluginsDefault) runCatching { a.mcpTools(true) }.getOrDefault(emptyList()) else emptyList()
+                val box = Tools(a, c?.web ?: webDefault, offered).also { tools = it }
+                fun line(role: String, content: String) = JSONObject().put("role", role).put("content", content)
+                val talk = mutableListOf<JSONObject>()
+                c?.systemPrompt?.let { talk += line("system", it) }
+                Personas.firstOrNull { it.id == persona }?.let { talk += line("system", it.prompt) }
+                asked.forEachIndexed { i, m -> talk += line(m.role, if (i == asked.lastIndex && lastText != null) lastText else m.text) }
+                receipt = answerWith(a, box, talk, "chat:$chatId", store, images, c?.temperature, c?.maxTokens)
             } catch (e: ImpulseError) {
                 failed = e.message
             } finally {
                 val l = live
                 live = null
-                withContext(Dispatchers.Main) { settle(chatId, replyId, l, receipt, failed) }
+                withContext(Dispatchers.Main) { settle(chatId, replyId, l, receipt, failed, tools) }
             }
         }
     }
 
-    private fun settle(chatId: String, replyId: String, l: Live?, receipt: JSONObject?, failed: String?) {
+    /**
+     * The tool loop, as the panel runs it (data/tools/loop.ts): the model is offered the tools; each
+     * call it makes is run and its result handed back, for up to [TOOL_STEPS] steps; then it answers
+     * in words. Returns the last step's receipt, its time and tokens summed over every step.
+     */
+    private suspend fun answerWith(
+        a: Impulse,
+        tools: Tools,
+        talk: MutableList<JSONObject>,
+        actor: String,
+        store: String?,
+        images: List<String>,
+        temperature: Double?,
+        maxTokens: Int?,
+    ): JSONObject? {
+        var totalMs = 0L
+        var generated = 0L
+        var last: JSONObject? = null
+        var toolRole = true
+        var repaired = false
+        var closed = false
+        var step = 0
+        while (true) {
+            val wordsOnly = !tools.any || step >= TOOL_STEPS
+            if (wordsOnly && step > 0 && !closed) {
+                closed = true
+                talk += JSONObject().put("role", "user").put("content", "(From the app, not the user.) $CLOSE")
+            }
+            var said = ""
+            var callText = ""
+            var calls: JSONArray? = null
+            var unparsed: String? = null
+            var r: JSONObject? = null
+            val sent = if (toolRole) talk else talk.map { if (it.optString("role") == "tool") JSONObject().put("role", "user").put("content", "Tool result:\n${it.optString("content")}") else it }
+            try {
+                a.turn(sent, actor, store, effort, images, if (wordsOnly) null else tools.defs, temperature, maxTokens).collect { d ->
+                    val l = live ?: return@collect
+                    val now = System.currentTimeMillis()
+                    live = when (d) {
+                        is Delta.Text -> {
+                            said += d.text
+                            l.copy(text = said, step = null, queued = 0, textAt = l.textAt.takeIf { it > 0 } ?: now)
+                        }
+                        is Delta.Thinking -> l.copy(thought = l.thought + d.text, queued = 0, thoughtAt = l.thoughtAt.takeIf { it > 0 } ?: now)
+                        is Delta.Queued -> l.copy(queued = d.ahead)
+                        is Delta.ToolText -> l.also { callText += d.text }
+                        is Delta.ToolCalls -> l.also { calls = d.calls }
+                        is Delta.ToolUnparsed -> l.also { unparsed = d.raw }
+                        is Delta.Done -> l.also { r = d.receipt }
+                    }
+                }
+            } catch (e: ImpulseError) {
+                // A chat template with no place for tool results: they go in as the user's words, once.
+                if (toolRole && e.message.orEmpty().contains("template", true) && talk.any { it.optString("role") == "tool" }) {
+                    toolRole = false
+                    continue
+                }
+                throw e
+            }
+            r?.let {
+                last?.let { p ->
+                    totalMs += p.optLong("total_ms")
+                    generated += p.optLong("generated_tokens")
+                }
+                last = it
+            }
+            val made = calls?.objects()?.filter { it.optJSONObject("function")?.optString("name").orEmpty().isNotBlank() }.orEmpty()
+            if (!wordsOnly && made.isNotEmpty()) {
+                live = live?.copy(text = "")
+                talk += JSONObject().put("role", "assistant").put("content", said).put("tool_calls", JSONArray(made))
+                for (call in made) {
+                    val result = tools.call(call.getJSONObject("function").getString("name"), Tools.args(call)) { what ->
+                        live = live?.copy(step = what, links = tools.links.toList())
+                    }
+                    live = live?.copy(links = tools.links.toList())
+                    talk += JSONObject().put("role", "tool").put("content", result)
+                }
+                live = live?.copy(step = null)
+                step++
+                continue
+            }
+            // Two unreadable calls, or nothing said after the tools ran: the answer is due, without tools.
+            if (!wordsOnly && (unparsed != null && repaired || said.isBlank() && tools.steps.isNotEmpty())) {
+                step = TOOL_STEPS
+                continue
+            }
+            if (!wordsOnly && unparsed != null) {
+                repaired = true
+                talk += JSONObject().put("role", "assistant").put("content", (said + (unparsed ?: callText)).take(2400))
+                talk += JSONObject().put("role", "user").put(
+                    "content",
+                    "(From the app, not the user.) Your tool call could not be used: it is not valid JSON or is missing its name. " +
+                        "Write the call again correctly - the exact tool name and every required argument - or answer without tools.",
+                )
+                live = live?.copy(text = "")
+                step++
+                continue
+            }
+            if (tools.steps.isNotEmpty()) {
+                val clean = said.substringBefore("<tool_call>").substringBefore("<function=").trimEnd()
+                if (clean != said) live = live?.copy(text = clean)
+            }
+            return last?.let { if (step > 0) JSONObject(it.toString()).put("total_ms", totalMs + it.optLong("total_ms")).put("generated_tokens", generated + it.optLong("generated_tokens")) else it }
+        }
+    }
+
+    private fun settle(chatId: String, replyId: String, l: Live?, receipt: JSONObject?, failed: String?, tools: Tools? = null) {
         val c = chats.firstOrNull { it.id == chatId } ?: return
         val msgs = c.messages.map { m ->
             if (m.id != replyId) m else Message(JSONObject(m.raw.toString()).apply {
@@ -458,6 +671,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 if (l != null && l.thoughtAt > 0) put("thoughtMs", (if (l.textAt > 0) l.textAt else System.currentTimeMillis()) - l.thoughtAt)
                 remove("streaming")
                 receipt?.let { put("receipt", it) }
+                tools?.seen?.takeIf { it.isNotEmpty() }?.let { s -> put("sources", JSONArray(s.map { (t, u) -> JSONObject().put("title", t).put("url", u) })) }
+                tools?.steps?.takeIf { it.isNotEmpty() }?.let { s -> put("appSteps", JSONArray(s.map { it.json() })) }
                 if (failed != null) put("error", failed)
             })
         }
@@ -469,5 +684,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun stop() {
         answer?.cancel()
         answer = null
+    }
+
+    private companion object {
+        const val TOOL_STEPS = 6
+        const val CLOSE =
+            "No more tools: answer the user's latest message now, in their language, from what you found above. " +
+                "Say in one sentence what is missing or could not be done. Never mention tools, steps or this note."
     }
 }

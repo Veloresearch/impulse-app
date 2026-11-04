@@ -47,6 +47,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -71,6 +74,7 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
@@ -118,7 +122,16 @@ import kotlin.math.sign
 
 @Composable
 fun App(m: AppModel) {
-    CompositionLocalProvider(LocalAccent provides accentOf(m.accent), LocalReduceMotion provides m.reduceMotion) {
+    val view = LocalView.current
+    val base = LocalDensity.current
+    SideEffect { Feel.enabled = m.haptics }
+    LaunchedEffect(m, view) { snapshotFlow { m.keepAwake && m.streaming }.collect { view.keepScreenOn = it } }
+    DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
+    CompositionLocalProvider(
+        LocalAccent provides accentOf(m.accent),
+        LocalReduceMotion provides m.reduceMotion,
+        LocalDensity provides Density(base.density, base.fontScale * m.textScale),
+    ) {
         var intro by rememberSaveable { mutableStateOf(!m.reduceMotion) }
         var handed by rememberSaveable { mutableStateOf(!intro) }
         val reveal = remember { Animatable(if (handed) 1f else 0f) }
