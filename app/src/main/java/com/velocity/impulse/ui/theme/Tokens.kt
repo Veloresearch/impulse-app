@@ -93,6 +93,11 @@ object Motion {
     fun <T> press() = spring<T>(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)
     fun <T> travel() = spring<T>(dampingRatio = 0.82f, stiffness = 420f)
     fun <T> settle() = spring<T>(dampingRatio = 0.9f, stiffness = Spring.StiffnessLow)
+    fun <T> drawer() = spring<T>(dampingRatio = 0.92f, stiffness = 420f)
+    fun <T> morph() = spring<T>(dampingRatio = 0.9f, stiffness = 380f)
+
+    /** Moving text never overshoots. */
+    fun <T> calmText() = spring<T>(dampingRatio = 1f, stiffness = 600f)
 }
 
 private val Weights = listOf(300, 400, 500, 600)

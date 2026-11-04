@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -67,6 +68,7 @@ fun Btn(
     icon: Glyph? = null,
     enabled: Boolean = true,
     height: Dp = 48.dp,
+    blocked: (() -> Unit)? = null,
 ) {
     val accent = LocalAccent.current
     val (rest, down, ink) = when (variant) {
@@ -78,7 +80,7 @@ fun Btn(
     Row(
         modifier
             .height(height)
-            .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled, stretch = true)
+            .pressable(onClick, Squircle(height * 0.27f), rest, down, enabled = enabled, stretch = true, blocked = blocked)
             .padding(horizontal = Space.S4),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -100,9 +102,13 @@ fun IconBtn(
     fill: Color = Tone.Raise,
     size: Dp = 40.dp,
     enabled: Boolean = true,
+    island: Boolean = false,
 ) {
     Box(
-        modifier.size(size).pressable(onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press, depth = 0.88f, enabled = enabled, stretch = true),
+        modifier.size(size).pressable(
+            onClick, CircleShape, fill, if (fill == Color.Transparent) Tone.Raise else Tone.Press,
+            depth = 0.88f, enabled = enabled, stretch = true, feelOnDown = island,
+        ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, tint, size = size * 0.48f)
@@ -112,12 +118,12 @@ fun IconBtn(
 @Composable
 fun Toggle(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val accent = LocalAccent.current
-    val track by animateColorAsState(if (checked) accent else Tone.Press, label = "track")
+    val track by animateColorAsState(if (checked) accent else Tone.Press, tween(Motion.M2), label = "track")
     val knob by animateDpAsState(if (checked) 20.dp else 0.dp, Motion.travel(), label = "knob")
     Box(
         modifier
             .size(51.dp, 31.dp)
-            .pressable({ onChange(!checked) }, depth = 0.92f, role = Role.Switch, stretch = true)
+            .pressable({ onChange(!checked) }, depth = 0.92f, feel = if (checked) Feel.Off else Feel.On, role = Role.Switch, stretch = true)
             .background(track, CircleShape)
             .padding(2.dp),
     ) {

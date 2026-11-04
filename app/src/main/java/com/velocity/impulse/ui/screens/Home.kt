@@ -1,97 +1,172 @@
 package com.velocity.impulse.ui.screens
 
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.ui.Lang.tr
+import com.velocity.impulse.ui.LocalShell
+import com.velocity.impulse.ui.Surface
+import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Glyph
-import com.velocity.impulse.ui.components.Icon
-import com.velocity.impulse.ui.components.pressable
+import com.velocity.impulse.ui.components.MorphSource
+import com.velocity.impulse.ui.components.Variant
+import com.velocity.impulse.ui.components.morph
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
+import com.velocity.impulse.ui.theme.Motion
 import com.velocity.impulse.ui.theme.Shapes
-import com.velocity.impulse.ui.theme.Space
-import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
+private enum class Standing { Offline, Loading, Ready, None }
+
+/** The empty new chat: a greeting that settles in word by word, then one line on where things stand. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(m: AppModel, openChat: (String?) -> Unit, openModels: () -> Unit, openContexts: () -> Unit) {
-    val accent = LocalAccent.current
-    Page {
-        Column(Modifier.padding(top = Space.S3), verticalArrangement = Arrangement.spacedBy(Space.S1)) {
-            BasicText(m.me?.name?.let { tr("Hi, $it", "Cześć, $it") } ?: "Impulse", style = Type.Display)
-            BasicText(
-                when {
-                    m.online == false -> tr("Your computer cannot be reached right now.", "Nie ma teraz połączenia z Twoim komputerem.")
-                    m.status?.model != null -> tr("Ready. Everything runs on your computer.", "Gotowe. Wszystko działa na Twoim komputerze.")
-                    else -> tr("Load a model to start chatting.", "Wczytaj model, żeby zacząć rozmowę.")
+internal fun Greeting(m: AppModel, modifier: Modifier = Modifier) {
+    val shell = LocalShell.current
+    val calm = shell.calm
+    val hour = remember { java.time.LocalTime.now().hour }
+    val hello = when {
+        hour < 12 -> tr("Good morning", "Dzień dobry")
+        hour < 18 -> tr("Good afternoon", "Dzień dobry")
+        else -> tr("Good evening", "Dobry wieczór")
+    }
+    val name = m.me?.name?.substringBefore(' ')?.ifBlank { null }
+    val title = if (name != null) "$hello, $name" else "Impulse"
+    val words = remember(title) { title.split(' ') }
+    val rise = remember(title) { words.map { Animatable(0f) } }
+    val line = remember { Animatable(0f) }
+    val action = remember { Animatable(0f) }
+
+    LaunchedEffect(title) {
+        rise.forEachIndexed { i, a ->
+            launch {
+                if (!calm) delay(40L * i)
+                a.animateTo(1f, if (calm) tween(220) else spring(0.9f, 400f))
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (calm) {
+            launch { line.animateTo(1f, tween(220)) }
+            action.animateTo(1f, tween(220))
+            return@LaunchedEffect
+        }
+        delay(40L * (words.size - 1) + 120)
+        launch { line.animateTo(1f, tween(Motion.M3, easing = Motion.Out)) }
+        delay(80)
+        action.animateTo(1f, tween(Motion.M3, easing = Motion.Out))
+    }
+
+    val standing = when {
+        m.online == false -> Standing.Offline
+        m.loading != null -> Standing.Loading
+        m.status?.model != null -> Standing.Ready
+        else -> Standing.None
+    }
+    val lift = if (calm) 0.dp else 10.dp
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                words.forEachIndexed { i, w ->
+                    BasicText(
+                        w,
+                        Modifier.graphicsLayer {
+                            val a = rise[i].value
+                            translationY = (1f - a) * lift.toPx()
+                            alpha = a.coerceIn(0f, 1f)
+                        },
+                        style = Type.Display.copy(textAlign = TextAlign.Center),
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            AnimatedContent(
+                standing,
+                Modifier.graphicsLayer {
+                    val a = line.value
+                    alpha = a
+                    if (!calm) translationY = (1f - a) * 6.dp.toPx()
                 },
-                style = Type.Body.copy(color = Ink.Three),
-            )
-        }
-
-        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
-            Tile(Glyph.Chat, tr("New chat", "Nowy czat"), tr("Ask anything", "Zapytaj o cokolwiek"), Modifier.weight(1f).fillMaxHeight(), accent) { openChat(null) }
-            Tile(
-                Glyph.Models, tr("Model", "Model"),
-                m.status?.model?.name ?: tr("Not loaded", "Nie wczytano"), Modifier.weight(1f).fillMaxHeight(), null, openModels,
-            )
-        }
-        Tile(
-            Glyph.Contexts, tr("Context", "Kontekst"),
-            m.defaultContext ?: tr("None. Answers use only the chat.", "Brak. Odpowiedzi biorą tylko z czatu."), Modifier.fillMaxWidth(), null, openContexts,
-        )
-
-        val recent = m.chats.take(5)
-        if (recent.isNotEmpty()) {
-            BasicText(tr("Continue", "Kontynuuj"), style = Type.Section, modifier = Modifier.padding(top = Space.S3))
-            Column(Modifier.background(Tone.App, Shapes.Tile), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                recent.forEach { c ->
-                    Column(
-                        Modifier.fillMaxWidth().pressable({ openChat(c.id) }, Shapes.Tile, Tone.Panel, Tone.Raise, depth = 0.99f)
-                            .padding(horizontal = Space.S4, vertical = Space.S3),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            BasicText(c.title.ifBlank { tr("Chat", "Czat") }, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            BasicText(whenLabel(c.updatedAt), style = Type.Meta.copy(color = Ink.Four))
+                transitionSpec = { fadeIn(tween(Motion.M2)) togetherWith fadeOut(tween(Motion.M1)) },
+                contentAlignment = Alignment.TopCenter,
+                label = "standing",
+            ) { s ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val note = Type.Body.copy(color = Ink.Three, textAlign = TextAlign.Center)
+                    val button = Modifier.padding(top = 20.dp).graphicsLayer {
+                        val a = action.value
+                        alpha = a
+                        if (!calm) {
+                            scaleX = 0.94f + 0.06f * a
+                            scaleY = scaleX
                         }
-                        BasicText(c.messages.lastOrNull()?.text.orEmpty().replace('\n', ' '), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    when (s) {
+                        Standing.Ready -> {
+                            val model = m.status?.model?.name.orEmpty()
+                            BasicText(tr("$model is ready on your computer.", "$model czeka na Twoim komputerze."), style = note)
+                        }
+                        Standing.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            val path = m.loading.orEmpty()
+                            val model = m.library.firstOrNull { it.path == path }?.name ?: path.substringAfterLast('/').substringAfterLast('\\')
+                            Spinner(LocalAccent.current, 14.dp)
+                            Spacer(Modifier.width(8.dp))
+                            BasicText(tr("Loading $model…", "Wczytywanie $model…"), style = note)
+                        }
+                        Standing.None -> {
+                            BasicText(tr("Pick a model to start.", "Wybierz model, żeby zacząć."), style = note)
+                            MorphSource("greeting-model", Surface.Model, button) {
+                                Btn(
+                                    tr("Choose a model", "Wybierz model"),
+                                    { shell.open(Surface.Model, "greeting-model") },
+                                    Modifier.morph("greeting-model", this, Shapes.Card),
+                                    Variant.Primary,
+                                    Glyph.Models,
+                                )
+                            }
+                        }
+                        Standing.Offline -> {
+                            BasicText(tr("Your computer can't be reached right now.", "Nie ma teraz połączenia z Twoim komputerem."), style = note)
+                            MorphSource("greeting-computer", Surface.Computer, button) {
+                                Btn(
+                                    tr("Check connection", "Sprawdź połączenie"),
+                                    { shell.open(Surface.Computer, "greeting-computer") },
+                                    Modifier.morph("greeting-computer", this, Shapes.Card),
+                                    Variant.Standard,
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Tile(glyph: Glyph, label: String, value: String, modifier: Modifier, tint: androidx.compose.ui.graphics.Color?, onClick: () -> Unit) {
-    Column(
-        modifier.pressable(onClick, Shapes.Card, Tone.Panel, Tone.Raise, stretch = true).padding(Space.S4),
-    ) {
-        Box(Modifier.size(34.dp).background(tint?.copy(alpha = 0.16f) ?: Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) {
-            Icon(glyph, tint ?: Ink.Two, size = 18.dp)
-        }
-        Spacer(Modifier.height(Space.S3))
-        BasicText(label, style = Type.Label)
-        Spacer(Modifier.height(2.dp))
-        BasicText(value, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 

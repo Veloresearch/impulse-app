@@ -23,6 +23,7 @@ enum class Glyph(private val regular: Int, private val bold: Int, private val fi
     Models(R.drawable.ph_cube_regular, R.drawable.ph_cube_bold, R.drawable.ph_cube_fill, Weight.Fill),
     Contexts(R.drawable.ph_stack_regular, R.drawable.ph_stack_bold, R.drawable.ph_stack_fill, Weight.Fill),
     More(R.drawable.ph_dots_three_regular, R.drawable.ph_dots_three_bold, R.drawable.ph_dots_three_fill, Weight.Bold),
+    Sidebar(R.drawable.ph_sidebar_simple_regular, R.drawable.ph_sidebar_simple_bold, R.drawable.ph_sidebar_simple_fill, Weight.Bold),
     Settings(R.drawable.ph_faders_regular, R.drawable.ph_faders_bold, R.drawable.ph_faders_fill, Weight.Bold),
     Search(R.drawable.ph_magnifying_glass_regular, R.drawable.ph_magnifying_glass_bold, R.drawable.ph_magnifying_glass_fill, Weight.Bold),
     Plus(R.drawable.ph_plus_regular, R.drawable.ph_plus_bold, R.drawable.ph_plus_fill, Weight.Bold),

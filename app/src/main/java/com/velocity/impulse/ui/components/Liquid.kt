@@ -27,10 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.launch
 
@@ -50,7 +49,7 @@ fun LiquidSlots(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val hand = LocalHapticFeedback.current
+    val view = LocalView.current
     val density = LocalDensity.current
     val pick = rememberUpdatedState(onSelect)
     val scope = rememberCoroutineScope()
@@ -98,7 +97,7 @@ fun LiquidSlots(
                         val now = (finger / wPx).toInt().coerceIn(0, count - 1)
                         if (now != at) {
                             at = now
-                            hand.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.feel(Feel.Tick)
                             pick.value(now)
                         }
                     },

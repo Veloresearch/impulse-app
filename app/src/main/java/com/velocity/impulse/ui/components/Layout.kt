@@ -21,11 +21,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,7 +69,7 @@ fun ListRow(
 ) {
     val base = modifier.fillMaxWidth().heightIn(min = 56.dp)
     Row(
-        (if (onClick != null) base.pressable(onClick, null, Tone.Panel, Tone.Raise, depth = 0.985f) else base.background(Tone.Panel))
+        (if (onClick != null) base.pressable(onClick, null, Tone.Panel, Tone.Raise, depth = 1f, feel = null) else base.background(Tone.Panel))
             .padding(horizontal = Space.S4, vertical = Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -99,7 +100,7 @@ fun <T> Choice(
     Column(Modifier.fillMaxWidth().background(Tone.Panel)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 0.985f)
+                .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
                 .padding(horizontal = Space.S4, vertical = Space.S3),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -119,7 +120,7 @@ fun <T> Choice(
                     val shown by animateFloatAsState(if (on) 1f else 0f, Motion.press(), label = "check")
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .pressable({ onSelect(o); open = false }, Shapes.ControlLg, Tone.Panel, Tone.Raise, depth = 0.98f)
+                            .pressable({ onSelect(o); open = false }, Shapes.ControlLg, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
                             .padding(horizontal = Space.S3),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -148,12 +149,12 @@ fun Disclosure(title: String, modifier: Modifier = Modifier, content: @Composabl
     Column(modifier.fillMaxWidth().background(Tone.Panel)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 0.985f)
+                .pressable({ open = !open }, null, Tone.Panel, Tone.Raise, depth = 1f, feel = Feel.Tick)
                 .padding(horizontal = Space.S4),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicText(title, Modifier.weight(1f), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-            Image(Icons.Default.KeyboardArrowRight, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
+            Image(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(20.dp).rotate(turn), colorFilter = ColorFilter.tint(Ink.Three))
         }
         AnimatedVisibility(
             open,
@@ -166,10 +167,16 @@ fun Disclosure(title: String, modifier: Modifier = Modifier, content: @Composabl
 }
 
 @Composable
-fun PageTitle(title: String, lead: String? = null, modifier: Modifier = Modifier, trailing: @Composable RowScope.() -> Unit = {}) {
+fun PageTitle(
+    title: String,
+    lead: String? = null,
+    modifier: Modifier = Modifier,
+    titleModifier: Modifier = Modifier,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
     Column(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            BasicText(title, Modifier.weight(1f), style = Type.Display)
+            BasicText(title, Modifier.weight(1f).wrapContentWidth(Alignment.Start).then(titleModifier), style = Type.Display)
             trailing()
         }
         if (lead != null) {

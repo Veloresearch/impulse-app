@@ -23,7 +23,15 @@ import java.io.File
 enum class Stage { Connect, SignIn, Ready }
 
 /** The answer being written right now, kept apart from the chat so each token is not a whole copy. */
-data class Live(val chatId: String, val messageId: String, val text: String = "", val thought: String = "", val queued: Int = 0)
+data class Live(
+    val chatId: String,
+    val messageId: String,
+    val text: String = "",
+    val thought: String = "",
+    val queued: Int = 0,
+    val thoughtAt: Long = 0L,
+    val textAt: Long = 0L,
+)
 
 class AppModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("impulse", MODE_PRIVATE)
@@ -394,9 +402,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             try {
                 api().turn(asked.map { it.role to it.text }, chatId, store, effort).collect { d ->
                     val l = live ?: return@collect
+                    val now = System.currentTimeMillis()
                     live = when (d) {
-                        is Delta.Text -> l.copy(text = l.text + d.text, queued = 0)
-                        is Delta.Thinking -> l.copy(thought = l.thought + d.text, queued = 0)
+                        is Delta.Text -> l.copy(text = l.text + d.text, queued = 0, textAt = l.textAt.takeIf { it > 0 } ?: now)
+                        is Delta.Thinking -> l.copy(thought = l.thought + d.text, queued = 0, thoughtAt = l.thoughtAt.takeIf { it > 0 } ?: now)
                         is Delta.Queued -> l.copy(queued = d.ahead)
                         is Delta.Done -> l.also { receipt = d.receipt }
                     }
@@ -417,6 +426,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             if (m.id != replyId) m else Message(JSONObject(m.raw.toString()).apply {
                 put("text", l?.text.orEmpty())
                 if (!l?.thought.isNullOrBlank()) put("thought", l!!.thought)
+                if (l != null && l.thoughtAt > 0) put("thoughtMs", (if (l.textAt > 0) l.textAt else System.currentTimeMillis()) - l.thoughtAt)
                 remove("streaming")
                 receipt?.let { put("receipt", it) }
                 if (failed != null) put("error", failed)
