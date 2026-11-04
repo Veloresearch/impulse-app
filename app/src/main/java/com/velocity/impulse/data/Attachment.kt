@@ -3,6 +3,8 @@ package com.velocity.impulse.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -76,9 +78,9 @@ data class Attachment(
                 when {
                     image -> {
                         if (!vision) return@withContext no(Lang.tr("this model reads text only - load one that can see pictures", "ten model czyta tylko tekst - wczytaj taki, który widzi zdjęcia"))
-                        val bitmap = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        val bitmap = upright(ctx, uri)
                             ?: return@withContext no(Lang.tr("save it as JPEG or PNG first", "zapisz go najpierw jako JPEG lub PNG"))
-                        Attachment(name, size, jpeg(bitmap, 1536, 85), "data:image/jpeg;base64," + jpeg(bitmap, 96, 70))
+                        Attachment(name, size, jpeg(bitmap, SEEN, 85), "data:image/jpeg;base64," + jpeg(bitmap, THUMB, 82))
                     }
                     document -> {
                         val got = Extract.document(ctx, uri, name, type, if (vision) SCANNED_PAGES else 0)
@@ -110,6 +112,40 @@ data class Attachment(
 
         private fun mb(n: Long) = if (n >= 1024 * 1024) "${n / (1024 * 1024)} MB" else "${n / 1024} KB"
 
+        /** Longest side of the picture the model sees and the phone keeps. */
+        private const val SEEN = 1536
+
+        /** Longest side of the thumbnail the chat record carries to every device. */
+        private const val THUMB = 384
+
+        /**
+         * The picture decoded no larger than it needs to be and turned the way it was taken: cameras
+         * store the sensor's rows and say in EXIF how to rotate or mirror them.
+         */
+        private fun upright(ctx: Context, uri: Uri): Bitmap? {
+            val cr = ctx.contentResolver
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= SEEN) sample *= 2
+            val b = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return null
+            val turn = runCatching {
+                cr.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+            }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
+            val m = Matrix()
+            when (turn) {
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> m.setScale(-1f, 1f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> m.setRotate(180f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> m.apply { setRotate(180f); postScale(-1f, 1f) }
+                ExifInterface.ORIENTATION_TRANSPOSE -> m.apply { setRotate(90f); postScale(-1f, 1f) }
+                ExifInterface.ORIENTATION_ROTATE_90 -> m.setRotate(90f)
+                ExifInterface.ORIENTATION_TRANSVERSE -> m.apply { setRotate(-90f); postScale(-1f, 1f) }
+                ExifInterface.ORIENTATION_ROTATE_270 -> m.setRotate(-90f)
+                else -> return b
+            }
+            return Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
+        }
+
         private fun jpeg(b: Bitmap, longest: Int, quality: Int): String {
             val scale = minOf(1f, longest.toFloat() / maxOf(b.width, b.height))
             val s = if (scale < 1f) Bitmap.createScaledBitmap(b, (b.width * scale).toInt().coerceAtLeast(1), (b.height * scale).toInt().coerceAtLeast(1), true) else b
@@ -134,6 +170,9 @@ class Media(private val dir: File) {
         pictures.forEachIndexed { i, p -> File(d, "$i.jpg").writeBytes(Base64.decode(p, Base64.NO_WRAP)) }
         docs.forEachIndexed { i, doc -> File(d, "$i.txt").writeText(doc.name + "\n" + doc.text) }
     }
+
+    /** The full picture [slot] of a question sent from this phone, null when it was sent elsewhere. */
+    fun picture(id: String, slot: Int): File? = File(of(id), "$slot.jpg").takeIf { it.isFile }
 
     fun pictures(id: String): List<String> = of(id).listFiles { f -> f.name.endsWith(".jpg") }.orEmpty()
         .sortedBy { it.nameWithoutExtension.toIntOrNull() ?: 0 }.map { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }

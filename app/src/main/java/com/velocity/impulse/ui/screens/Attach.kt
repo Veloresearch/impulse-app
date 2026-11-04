@@ -5,27 +5,24 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -43,8 +40,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -52,20 +52,34 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -86,15 +100,18 @@ import com.velocity.impulse.ui.LocalShell
 import com.velocity.impulse.ui.components.Feel
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Icon
+import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
 import com.velocity.impulse.ui.theme.LocalReduceMotion
 import com.velocity.impulse.ui.theme.Motion
+import com.velocity.impulse.ui.theme.Radius
 import com.velocity.impulse.ui.theme.Shapes
 import com.velocity.impulse.ui.theme.Signal
 import com.velocity.impulse.ui.theme.Space
+import com.velocity.impulse.ui.theme.Theme
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import kotlinx.coroutines.Dispatchers
@@ -104,6 +121,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 class Pickers(val camera: () -> Unit, val photos: () -> Unit, val files: () -> Unit)
 
@@ -181,44 +200,109 @@ internal object Originals {
     }
 }
 
+/** The island's rounded outline: [w] by [h] from the bottom-left corner, where the plus sits. */
+private data class Grown(val w: Float, val h: Float, val r: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density) =
+        Outline.Rounded(RoundRect(0f, size.height - h, w, size.height, CornerRadius(r)))
+}
+
 /**
- * The plus opens into this: a small island that grows out of the plus's corner, its rows arriving
- * one after another from where the finger is.
+ * The plus opening into its menu the way the Dynamic Island grows: one island anchored at the
+ * plus, its size and corner on a single spring, the plus turning into the island's close mark.
+ * The rows arrive once the shape is most of the way there and leave first on the way back.
+ * [grow] runs 0 (the plus) to 1 (the island); [plus] is the plus's bounds in root.
  */
 @Composable
-fun AddMenu(open: Boolean, calm: Boolean, onCamera: () -> Unit, onPhotos: () -> Unit, onFiles: () -> Unit) {
-    AnimatedVisibility(
-        open,
-        enter = if (calm) fadeIn(tween(Motion.M2)) else fadeIn(tween(Motion.M1)) + scaleIn(spring(0.72f, 520f), 0.2f, TransformOrigin(0.08f, 1f)),
-        exit = if (calm) fadeOut(tween(Motion.M1)) else fadeOut(tween(Motion.M1)) + scaleOut(tween(Motion.M2, easing = Motion.Leave), 0.4f, TransformOrigin(0.08f, 1f)),
+fun BoxScope.AddIsland(
+    open: Boolean,
+    grow: Animatable<Float, AnimationVector1D>,
+    plus: State<Rect>,
+    onClose: () -> Unit,
+    onCamera: () -> Unit,
+    onPhotos: () -> Unit,
+    onFiles: () -> Unit,
+) {
+    val calm = LocalReduceMotion.current
+    LaunchedEffect(open) {
+        grow.animateTo(
+            if (open) 1f else 0f,
+            when {
+                calm -> tween(Motion.M2)
+                open -> spring(0.74f, 380f)
+                else -> spring(0.92f, 460f)
+            },
+        )
+    }
+    val shown by remember { derivedStateOf { grow.value > 0f } }
+    if (!open && !shown) return
+    BackHandler(open, onClose)
+    val host = remember { mutableStateOf(Offset.Zero) }
+    val corner = with(LocalDensity.current) { Radius.Sheet.toPx() }
+    Box(
+        Modifier.matchParentSize()
+            .onPlaced { host.value = it.positionInRoot() }
+            .then(if (open) Modifier.pointerInput(Unit) { detectTapGestures { onClose() } } else Modifier),
     ) {
-        Column(
-            Modifier.padding(bottom = Space.S2).widthIn(min = 220.dp, max = 280.dp)
-                .background(Tone.Float, Shapes.Card).padding(6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+        Box(
+            Modifier
+                .layout { measurable, c ->
+                    val p = measurable.measure(c.copy(minWidth = 0, minHeight = 0))
+                    layout(p.width, p.height) {
+                        val at = plus.value
+                        p.place((at.left - host.value.x).roundToInt(), (at.bottom - host.value.y).roundToInt() - p.height)
+                    }
+                }
+                .width(248.dp)
+                .graphicsLayer {
+                    val t = grow.value
+                    val k = t.coerceIn(0f, 1f)
+                    val s = plus.value.width
+                    shape = Grown(s + (size.width - s) * k, s + (size.height - s) * k, s / 2f + (corner - s / 2f) * k)
+                    clip = true
+                    shadowElevation = 10.dp.toPx() * k
+                    ambientShadowColor = Color.Black.copy(alpha = 0.2f * Theme.palette.shade)
+                    spotShadowColor = Color.Black.copy(alpha = 0.3f * Theme.palette.shade)
+                    val over = 1f + max(0f, t - 1f) * 0.6f
+                    scaleX = over
+                    scaleY = over
+                    transformOrigin = TransformOrigin(0f, 1f)
+                }
+                .drawBehind { drawRect(Tone.Float, alpha = (grow.value * 6f).coerceIn(0f, 1f)) }
+                .pointerInput(Unit) { detectTapGestures { } },
         ) {
-            listOf(
-                Triple(Glyph.Camera, tr("Take a photo", "Zrób zdjęcie"), onCamera),
-                Triple(Glyph.Image, tr("Add photos", "Dodaj zdjęcia"), onPhotos),
-                Triple(Glyph.File, tr("Add a file", "Dodaj plik"), onFiles),
-            ).forEachIndexed { i, (glyph, label, go) ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .animateEnterExit(
-                            enter = if (calm) EnterTransition.None else fadeIn(tween(Motion.M2, delayMillis = 40 + 40 * (2 - i))) +
-                                slideInVertically(spring(0.8f, 420f)) { it / 2 },
-                            exit = ExitTransition.None,
-                        )
-                        .heightIn(min = 52.dp)
-                        .pressable(go, Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f)
-                        .padding(horizontal = Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(glyph, Ink.One, size = 20.dp)
-                    Spacer(Modifier.width(Space.S3))
-                    BasicText(label, style = Type.Body.copy(fontWeight = FontWeight.Medium))
+            Column(
+                Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 46.dp)
+                    .graphicsLayer {
+                        val c = ((grow.value - 0.55f) / 0.4f).coerceIn(0f, 1f)
+                        alpha = c
+                        translationY = (1f - c) * 8.dp.toPx()
+                        if (Build.VERSION.SDK_INT >= 31) renderEffect = if (c in 0.01f..0.99f) BlurEffect((1f - c) * 12f, (1f - c) * 12f) else null
+                    },
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                listOf(
+                    Triple(Glyph.Camera, tr("Take a photo", "Zrób zdjęcie"), onCamera),
+                    Triple(Glyph.Image, tr("Add photos", "Dodaj zdjęcia"), onPhotos),
+                    Triple(Glyph.File, tr("Add a file", "Dodaj plik"), onFiles),
+                ).forEach { (glyph, label, go) ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .pressable(go, Shapes.ControlLg, Tone.Float, Tone.Raise, depth = 0.97f, enabled = open)
+                            .padding(horizontal = Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(glyph, Ink.One, size = 20.dp)
+                        Spacer(Modifier.width(Space.S3))
+                        BasicText(label, style = Type.Body.copy(fontWeight = FontWeight.Medium))
+                    }
                 }
             }
+            IconBtn(
+                Glyph.Plus, onClose,
+                Modifier.align(Alignment.BottomStart).graphicsLayer { rotationZ = 45f * grow.value.coerceIn(0f, 1f) },
+                tint = Ink.Two, fill = Color.Transparent, size = 44.dp, description = tr("Close", "Zamknij"),
+            )
         }
     }
 }
@@ -272,16 +356,21 @@ fun AttachRow(items: List<Attachment>, onRemove: (Attachment) -> Unit) {
 }
 
 /**
- * The pictures and files a sent question carried, small, above its text. A tap opens the preview
- * with every file of the chat to step through; a long press on a picture saves or shares it.
+ * The pictures and files a sent question carried, above its text. A picture sent from this phone
+ * shows its kept full copy; one sent elsewhere shows its thumbnail, never larger than it is. A tap
+ * opens the preview with every file of the chat to step through; a long press on a picture saves
+ * or shares it.
  */
 @Composable
 fun SentFiles(files: List<JSONObject>) {
     val ctx = LocalContext.current
+    val d = LocalDensity.current
     val m = LocalShell.current.m
+    val media = remember { Media(File(ctx.filesDir, "media")) }
     // Read once, unobserved: the chat changes as answers stream and these tiles must not follow it.
     val owner = remember(files) { Snapshot.withoutReadObservation { m.chat }?.let { ownerOf(it, files) } }
     val items = remember(files, owner) { sentItems(owner, files) }
+    val tile = if (files.size == 1) 132.dp else 72.dp
     Row(Modifier.padding(bottom = Space.S1), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         files.take(4).forEachIndexed { i, f ->
             val item = items[i]
@@ -289,13 +378,17 @@ fun SentFiles(files: List<JSONObject>) {
             val album = { albumOf(m.chat).takeIf { all -> all.any { it.key == item.key } } ?: items }
             if (thumb != null) {
                 var acting by remember { mutableStateOf(false) }
+                val kept = remember(owner, item.slot) { owner?.takeIf { item.looked > 0 }?.let { media.picture(it, item.slot) } }
+                val side = if (kept != null) tile else minOf(tile, with(d) { minOf(thumb.width, thumb.height).toDp() })
+                val px = with(d) { side.roundToPx() }
+                val sharp by produceState<ImageBitmap?>(null, kept, px) { kept?.let { k -> value = withContext(Dispatchers.IO) { sampled(k, px) } } }
                 Box {
                     Image(
-                        thumb, null,
-                        Modifier.size(72.dp).hiddenWhile(item).opens(item, album, { acting = true }).clip(Shapes.Tile),
+                        sharp ?: thumb, null,
+                        Modifier.size(side).hiddenWhile(item).opens(item, album, { acting = true }).clip(Shapes.Tile),
                         contentScale = ContentScale.Crop,
                     )
-                    if (acting) PictureActions(item.name, { owner?.let { Media(File(ctx.filesDir, "media")).pictures(it).getOrNull(item.slot) } }) { acting = false }
+                    if (acting) PictureActions(item.name, { owner?.let { media.pictures(it).getOrNull(item.slot) } }) { acting = false }
                 }
             } else {
                 Row(
@@ -433,6 +526,15 @@ internal fun Capsule(label: String, onClick: () -> Unit) {
 internal fun bitmap(uri: String) = runCatching {
     val b = bytesOf(uri)
     BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
+}.getOrNull()
+
+/** A kept picture decoded at no less than [side] px on its shorter side, and no more than twice that. */
+internal fun sampled(f: File, side: Int): ImageBitmap? = runCatching {
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(f.path, o)
+    var s = 1
+    while (minOf(o.outWidth, o.outHeight) / (s * 2) >= side) s *= 2
+    BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s })?.asImageBitmap()
 }.getOrNull()
 
 /** The bytes of a data: URL or bare base64. */

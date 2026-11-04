@@ -269,6 +269,8 @@ private fun Picture(item: PreviewItem, small: ImageBitmap, found: Found?, progre
     val pan = remember(item) { Animatable(Offset.Zero, Offset.VectorConverter) }
     val drag = remember(item) { Animatable(Offset.Zero, Offset.VectorConverter) }
     val src = found?.full
+    // Only a thumbnail on the phone: shown at its own pixels, never blown up into a blur.
+    val natural = found != null && src == null
     val full = produceState<ImageBitmap?>(null, item, src) {
         if (item.thumb != null && src != null) value = withContext(Dispatchers.Default) { bitmap(src) }
     }
@@ -284,13 +286,13 @@ private fun Picture(item: PreviewItem, small: ImageBitmap, found: Found?, progre
     Canvas(
         Modifier.fillMaxSize()
             .glassSource(haze)
-            .pointerInput(item) {
+            .pointerInput(item, natural) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     if (!PreviewState.showing) return@awaitEachGesture
                     val box = size.toSize()
                     val c = box.center
-                    val f = fit(box, small)
+                    val f = fit(box, small, natural)
                     val tracker = VelocityTracker()
                     var mode = 0
                     var travel = Offset.Zero
@@ -356,13 +358,13 @@ private fun Picture(item: PreviewItem, small: ImageBitmap, found: Found?, progre
                     }
                 }
             }
-            .pointerInput(item) {
+            .pointerInput(item, natural) {
                 detectTapGestures(onDoubleTap = { q ->
                     if (!PreviewState.showing) return@detectTapGestures
                     view.feel(Feel.Tick)
                     val box = size.toSize()
                     val z = if (zoom.value > 1.05f) 1f else 2.5f
-                    val to = clamp((q - box.center) * (1f - z), bounds(fit(box, small), z, box))
+                    val to = clamp((q - box.center) * (1f - z), bounds(fit(box, small, natural), z, box))
                     scope.launch { zoom.animateTo(z, Motion.morph()) }
                     scope.launch { pan.animateTo(to, Motion.morph()) }
                 })
@@ -371,7 +373,7 @@ private fun Picture(item: PreviewItem, small: ImageBitmap, found: Found?, progre
         val t = progress()
         val dragged = (abs(drag.value.y) / size.height).coerceIn(0f, 1f)
         drawRect(Color.Black, alpha = 0.94f * t * (1f - dragged * 1.4f).coerceIn(0f, 1f))
-        val f = fit(size, small)
+        val f = fit(size, small, natural)
         val k = zoom.value * (1f - 0.35f * dragged)
         val base = around(f.center + pan.value + drag.value, f.width * k, f.height * k)
         val start = from()
@@ -828,8 +830,9 @@ private class Window(private val r: Rect, private val radius: Float) : Shape {
 
 private fun around(c: Offset, w: Float, h: Float) = Rect(c.x - w / 2f, c.y - h / 2f, c.x + w / 2f, c.y + h / 2f)
 
-private fun fit(box: Size, b: ImageBitmap): Rect {
-    val s = min(box.width / b.width, box.height / b.height)
+/** The picture fitted into [box]; [natural] stops it at its own pixel size. */
+private fun fit(box: Size, b: ImageBitmap, natural: Boolean = false): Rect {
+    val s = min(box.width / b.width, box.height / b.height).let { if (natural) min(1f, it) else it }
     return around(box.center, b.width * s, b.height * s)
 }
 

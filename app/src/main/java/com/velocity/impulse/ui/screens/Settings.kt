@@ -10,7 +10,10 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -19,6 +22,15 @@ import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +38,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -40,20 +53,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -74,6 +91,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -111,9 +129,12 @@ import com.velocity.impulse.data.Device
 import com.velocity.impulse.data.KeepAwake
 import com.velocity.impulse.data.Link
 import com.velocity.impulse.data.Personas
+import com.velocity.impulse.data.Release
+import com.velocity.impulse.data.Updater
 import com.velocity.impulse.data.strings
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
+import com.velocity.impulse.ui.Pill
 import com.velocity.impulse.ui.components.Avatar
 import com.velocity.impulse.ui.components.Btn
 import com.velocity.impulse.ui.components.Choice
@@ -125,6 +146,7 @@ import com.velocity.impulse.ui.components.Group
 import com.velocity.impulse.ui.components.Icon
 import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.ListRow
+import com.velocity.impulse.ui.components.Markdown
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
 import com.velocity.impulse.ui.components.Segmented
@@ -132,6 +154,8 @@ import com.velocity.impulse.ui.components.Sheet
 import com.velocity.impulse.ui.components.Toggle
 import com.velocity.impulse.ui.components.Variant
 import com.velocity.impulse.ui.components.feel
+import com.velocity.impulse.ui.components.glass
+import com.velocity.impulse.ui.components.glassSource
 import com.velocity.impulse.ui.components.morphText
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Accents
@@ -146,6 +170,7 @@ import com.velocity.impulse.ui.theme.Squircle
 import com.velocity.impulse.ui.theme.Tone
 import com.velocity.impulse.ui.theme.Type
 import com.velocity.impulse.ui.theme.accentOf
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -200,93 +225,99 @@ fun SettingsPage(m: AppModel, scope: AnimatedVisibilityScope, scroll: ScrollStat
     var password by remember { mutableStateOf(false) }
     var device by remember { mutableStateOf<Device?>(null) }
     var dropping by remember { mutableStateOf(false) }
+    val haze = remember { HazeState() }
     Box(Modifier.fillMaxSize()) {
-        Page(scroll) {
-            Title(tr("Settings", "Ustawienia"), scope)
-            val me = m.me
-            val name = me?.name?.ifBlank { null } ?: "Impulse"
-            Header(m, name, Modifier.arrive(0)) { Avatar(name, me?.avatar, me?.photo, 64.dp) }
+        Box(Modifier.fillMaxSize().glassSource(haze)) {
+            Page(scroll) {
+                Title(tr("Settings", "Ustawienia"), scope)
+                val me = m.me
+                val name = me?.name?.ifBlank { null } ?: "Impulse"
+                Header(m, name, Modifier.arrive(0)) { Avatar(name, me?.avatar, me?.photo, 64.dp) }
 
-            Section(tr("Appearance", "Wygląd"), 1) {
-                ThemePicker(m)
-                AccentPicker(m)
-                TextSize(m)
-                Switch(
-                    tr("Reduce motion", "Ogranicz ruch"),
-                    if (m.systemCalm) tr("On, because the phone's Remove animations is on", "Włączone, bo telefon ma wyłączone animacje")
-                    else tr("Cross-fades instead of movement", "Przenikanie zamiast ruchu"),
-                    m.calm,
-                ) { m.calmMotion(it) }
-                Switch(tr("Haptics", "Wibracje"), tr("Light taps under your finger as things move", "Lekkie stuknięcia pod palcem, gdy coś się rusza"), m.haptics) { m.pickHaptics(it) }
-            }
-
-            Section(tr("Personality", "Osobowość"), 2, tr("Who answers you, here and on your computer.", "Kto ci odpowiada, tu i na komputerze.")) { Personality(m) }
-
-            Section(tr("Answers", "Odpowiedzi"), 3, tr("Shared with Impulse on your computer.", "Wspólne z Impulse na komputerze.")) { AnswerRows(m) }
-
-            Section(tr("Model", "Model"), 4, tr("Defaults for every chat. A chat can set its own in its details.", "Domyślne dla każdego czatu. Czat może mieć własne w szczegółach.")) {
-                Effort(m)
-                Samplers.forEach { key(it.key) { Dial(m, it) } }
-                Seed(m)
-                Stops(m)
-            }
-            Btn(
-                tr("Reset to defaults", "Przywróć domyślne"),
-                {
-                    AppModel.SAMPLING.forEach { if (m.sampling.has(it)) m.setSampling(it, null) }
-                    if (m.effort != null && m.effort != "medium") m.pickEffort("medium")
-                },
-                Modifier.fillMaxWidth().arrive(4),
-                Variant.Standard,
-                Glyph.Refresh,
-                enabled = m.sampling.length() > 0 || (m.effort != null && m.effort != "medium"),
-            )
-
-            Section(tr("Chat", "Czat"), 5) { ChatRows(m) }
-
-            Section(tr("Account", "Konto"), 6) { AccountRows(m, name) { password = true } }
-
-            Section(tr("Computer", "Komputer"), 7) { ComputerRows(m, x, { leave = true }, { restart = true }) }
-
-            Section(tr("Signed-in devices", "Zalogowane urządzenia"), 8, tr("Phones and browsers that reach this computer from outside it.", "Telefony i przeglądarki, które łączą się z komputerem z zewnątrz.")) {
-                DeviceRows(x) { device = it; dropping = true }
-            }
-            Btn(tr("Sign out", "Wyloguj się"), { signOut = true }, Modifier.fillMaxWidth().arrive(8), Variant.Danger, Glyph.SignOut)
-
-            Section(tr("Storage", "Pamięć"), 9) {
-                val n = m.chats.size
-                Line(
-                    tr("Clear local cache", "Wyczyść pamięć podręczną"),
-                    if (n == 1) tr("1 chat kept on this phone", "1 czat na tym telefonie") else tr("$n chats kept on this phone", "Czaty na tym telefonie: $n"),
-                    { clear = true },
-                ) {
-                    Icon(Glyph.Trash, Ink.Three, size = 20.dp)
+                Section(tr("Appearance", "Wygląd"), 1) {
+                    ThemePicker(m)
+                    AccentPicker(m)
+                    TextSize(m)
+                    Switch(
+                        tr("Reduce motion", "Ogranicz ruch"),
+                        if (m.systemCalm) tr("On, because the phone's Remove animations is on", "Włączone, bo telefon ma wyłączone animacje")
+                        else tr("Cross-fades instead of movement", "Przenikanie zamiast ruchu"),
+                        m.calm,
+                    ) { m.calmMotion(it) }
+                    Switch(tr("Haptics", "Wibracje"), tr("Light taps under your finger as things move", "Lekkie stuknięcia pod palcem, gdy coś się rusza"), m.haptics) { m.pickHaptics(it) }
                 }
-            }
 
-            Section(tr("About", "O aplikacji"), 10) {
-                ListRow("Impulse for Android", detail = tr("Version", "Wersja") + " " + BuildConfig.VERSION_NAME)
-                Line(tr("Source code", "Kod źródłowy"), Source.substringAfter("://"), { uri.openUri(Source) }) {
-                    Icon(Glyph.Right, Ink.Four, size = 16.dp)
+                Section(tr("Personality", "Osobowość"), 2, tr("Who answers you, here and on your computer.", "Kto ci odpowiada, tu i na komputerze.")) { Personality(m) }
+
+                Section(tr("Answers", "Odpowiedzi"), 3, tr("Shared with Impulse on your computer.", "Wspólne z Impulse na komputerze.")) { AnswerRows(m) }
+
+                Section(tr("Model", "Model"), 4, tr("Defaults for every chat. A chat can set its own in its details.", "Domyślne dla każdego czatu. Czat może mieć własne w szczegółach.")) {
+                    Effort(m)
+                    Samplers.forEach { key(it.key) { Dial(m, it) } }
+                    Seed(m)
+                    Stops(m)
                 }
-                Disclosure(tr("Open-source licenses", "Licencje open source")) {
-                    Licenses.forEach { l ->
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .pressable({ uri.openUri(l.url) }, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f)
-                                .padding(horizontal = Space.S2, vertical = Space.S2),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                BasicText(l.name, style = Type.Body)
-                                BasicText(l.license, style = Type.Meta)
+                Btn(
+                    tr("Reset to defaults", "Przywróć domyślne"),
+                    {
+                        AppModel.SAMPLING.forEach { if (m.sampling.has(it)) m.setSampling(it, null) }
+                        if (m.effort != null && m.effort != "medium") m.pickEffort("medium")
+                    },
+                    Modifier.fillMaxWidth().arrive(4),
+                    Variant.Standard,
+                    Glyph.Refresh,
+                    enabled = m.sampling.length() > 0 || (m.effort != null && m.effort != "medium"),
+                )
+
+                Section(tr("Chat", "Czat"), 5) { ChatRows(m) }
+
+                Section(tr("Account", "Konto"), 6) { AccountRows(m, name) { password = true } }
+
+                Section(tr("Computer", "Komputer"), 7) { ComputerRows(m, x, { leave = true }, { restart = true }) }
+
+                Section(tr("Signed-in devices", "Zalogowane urządzenia"), 8, tr("Phones and browsers that reach this computer from outside it.", "Telefony i przeglądarki, które łączą się z komputerem z zewnątrz.")) {
+                    DeviceRows(x) { device = it; dropping = true }
+                }
+                Btn(tr("Sign out", "Wyloguj się"), { signOut = true }, Modifier.fillMaxWidth().arrive(8), Variant.Danger, Glyph.SignOut)
+
+                Section(tr("Storage", "Pamięć"), 9) {
+                    val n = m.chats.size
+                    Line(
+                        tr("Clear local cache", "Wyczyść pamięć podręczną"),
+                        if (n == 1) tr("1 chat kept on this phone", "1 czat na tym telefonie") else tr("$n chats kept on this phone", "Czaty na tym telefonie: $n"),
+                        { clear = true },
+                    ) {
+                        Icon(Glyph.Trash, Ink.Three, size = 20.dp)
+                    }
+                }
+
+                Section(tr("Updates", "Aktualizacje"), 10) { UpdateRows() }
+
+                Section(tr("About", "O aplikacji"), 11) {
+                    Line(tr("Source code", "Kod źródłowy"), Source.substringAfter("://"), { uri.openUri(Source) }) {
+                        Icon(Glyph.Right, Ink.Four, size = 16.dp)
+                    }
+                    Disclosure(tr("Open-source licenses", "Licencje open source")) {
+                        Licenses.forEach { l ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .pressable({ uri.openUri(l.url) }, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f)
+                                    .padding(horizontal = Space.S2, vertical = Space.S2),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    BasicText(l.name, style = Type.Body)
+                                    BasicText(l.license, style = Type.Meta)
+                                }
+                                Icon(Glyph.Right, Ink.Four, size = 16.dp)
                             }
-                            Icon(Glyph.Right, Ink.Four, size = 16.dp)
                         }
                     }
                 }
+                if (Updater.release != null) Spacer(Modifier.height(IslandHeight + Space.S3))
             }
         }
+        UpdateIsland(haze)
         Leaving(m, signOut, leave) { signOut = false; leave = false }
         Restart(m, restart) { restart = false }
         DropDevice(m, x, device, dropping) { dropping = false }
@@ -1157,6 +1188,164 @@ private fun PasswordSheet(m: AppModel, open: Boolean, onClose: () -> Unit) {
             Btn(tr("Cancel", "Anuluj"), onClose, Modifier.fillMaxWidth(), Variant.Quiet)
         }
     }
+}
+
+private val IslandHeight = 64.dp
+
+/** Half the folded height, so the folded island is a capsule and the unfolded one a rounded card. */
+private val IslandShape = RoundedCornerShape(32.dp)
+
+/** This phone's version and the check; the arrows turn while GitHub is asked. */
+@Composable
+private fun UpdateRows() {
+    val ctx = LocalContext.current
+    val calm = LocalShell.current.calm
+    val accent = LocalAccent.current
+    val spin = remember { Animatable(0f) }
+    val step = Updater.step
+    val checking = step == Updater.Step.Checking
+    val tint by animateColorAsState(if (checking) accent else Ink.Three, tween(Motion.M2), label = "tint")
+    LaunchedEffect(checking) {
+        if (calm) return@LaunchedEffect
+        if (checking) {
+            while (true) spin.animateTo(spin.value + 360f, tween(800, easing = LinearEasing))
+        }
+        spin.animateTo(ceil(spin.value / 360f) * 360f, spring(1f, 220f))
+    }
+    ListRow("Impulse for Android", detail = tr("Version", "Wersja") + " " + BuildConfig.VERSION_NAME)
+    val r = Updater.release
+    Line(
+        tr("Check for updates", "Sprawdź aktualizacje"),
+        when {
+            checking -> tr("Asking GitHub", "Pytam GitHub")
+            step == Updater.Step.Failed -> Updater.problem.orEmpty()
+            r != null -> tr("Version ${r.version} is out", "Jest wersja ${r.version}")
+            step == Updater.Step.Current -> tr("Up to date", "Aktualna")
+            else -> tr("Checked once a day when Impulse opens", "Sprawdzane raz dziennie przy otwarciu")
+        },
+        { Updater.check(ctx) },
+    ) {
+        Icon(Glyph.Refresh, tint, Modifier.graphicsLayer { rotationZ = spin.value }, size = 20.dp)
+    }
+}
+
+/** Rises from the bottom of the page while a newer version waits. */
+@Composable
+private fun BoxScope.UpdateIsland(haze: HazeState) {
+    val calm = LocalShell.current.calm
+    AnimatedVisibility(
+        Updater.release != null,
+        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = Space.S4, vertical = Space.S3),
+        enter = if (calm) fadeIn(tween(Motion.M2)) else slideInVertically(spring(0.78f, 380f)) { it } + scaleIn(spring(0.7f, 420f), 0.86f) + fadeIn(tween(Motion.M2)),
+        exit = if (calm) fadeOut(tween(Motion.M1)) else slideOutVertically(Motion.settle()) { it } + fadeOut(tween(Motion.M2)),
+    ) {
+        Updater.release?.let { Island(haze, it) }
+    }
+}
+
+/** The new version, its notes folded under it, and one control that is Update, then a progress ring, then Install. */
+@Composable
+private fun Island(haze: HazeState, r: Release) {
+    val ctx = LocalContext.current
+    val accent = LocalAccent.current
+    val calm = LocalShell.current.calm
+    val step = Updater.step
+    var open by remember { mutableStateOf(false) }
+    val turn = animateFloatAsState(if (open) 180f else 0f, Motion.travel(), label = "notes")
+    val percent by remember { derivedStateOf { (Updater.progress * 100).roundToInt() } }
+    val size = String.format(Locale.US, "%.1f MB", r.bytes / 1_000_000.0)
+    Column(Modifier.fillMaxWidth().glass(haze, IslandShape)) {
+        Row(
+            Modifier.fillMaxWidth().height(IslandHeight).padding(start = 12.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier.weight(1f).pressable({ open = !open }, Capsule, enabled = r.notes.isNotEmpty(), feel = Feel.Tick, depth = 0.98f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(40.dp).background(accent.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Glyph.Sparkle, accent, size = 20.dp)
+                }
+                Spacer(Modifier.width(Space.S3))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicText("Impulse ${r.version}", style = Medium, maxLines = 1)
+                        if (r.notes.isNotEmpty()) {
+                            Spacer(Modifier.width(Space.S1))
+                            Icon(Glyph.Down, Ink.Three, Modifier.graphicsLayer { rotationZ = turn.value }, size = 14.dp)
+                        }
+                    }
+                    Roll(
+                        when (step) {
+                            Updater.Step.Downloading -> tr("Downloading $percent%", "Pobieranie $percent%")
+                            Updater.Step.Ready ->
+                                if (Updater.asking) tr("Allow installs from Impulse, then come back", "Zezwól Impulse na instalowanie, potem wróć")
+                                else tr("Downloaded and verified", "Pobrane i sprawdzone")
+                            Updater.Step.Failed -> Updater.problem.orEmpty()
+                            Updater.Step.Checking -> tr("Checking", "Sprawdzam")
+                            else -> tr("Update available · $size", "Dostępna aktualizacja · $size")
+                        },
+                        Type.Meta,
+                        digits = step == Updater.Step.Downloading,
+                        maxLines = 2,
+                    )
+                }
+            }
+            Spacer(Modifier.width(Space.S2))
+            AnimatedContent(
+                step == Updater.Step.Downloading,
+                transitionSpec = {
+                    val swap = if (calm) fadeIn(tween(Motion.M2)) togetherWith fadeOut(tween(Motion.M1))
+                    else (fadeIn(tween(Motion.M2)) + scaleIn(Motion.press(), 0.7f)) togetherWith (fadeOut(tween(Motion.M1)) + scaleOut(tween(Motion.M1), 0.7f))
+                    swap using SizeTransform(clip = false) { _, _ -> Motion.travel() }
+                },
+                contentAlignment = Alignment.Center,
+                label = "update",
+            ) { downloading ->
+                if (downloading) {
+                    ProgressRing(accent)
+                } else {
+                    val ready = step == Updater.Step.Ready
+                    Pill(
+                        when {
+                            ready -> tr("Install", "Zainstaluj")
+                            step == Updater.Step.Failed -> tr("Try again", "Ponów")
+                            else -> tr("Update", "Aktualizuj")
+                        },
+                        { if (ready) Updater.install(ctx) else Updater.download(ctx) },
+                        ink = OnAccent,
+                        fill = accent,
+                        enabled = step != Updater.Step.Checking,
+                    )
+                }
+            }
+        }
+        AnimatedVisibility(
+            open,
+            enter = expandVertically(Motion.travel()) + fadeIn(tween(Motion.M2, delayMillis = 60)),
+            exit = shrinkVertically(Motion.settle()) + fadeOut(tween(Motion.M1)),
+        ) {
+            Box(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()).padding(start = Space.S4, end = Space.S4, bottom = Space.S4)) {
+                Markdown(r.notes)
+            }
+        }
+    }
+}
+
+/** The download as an arc around a 40dp circle; only its drawing follows the bytes. */
+@Composable
+private fun ProgressRing(accent: Color) {
+    Box(
+        Modifier.size(40.dp)
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(Updater.progress, 0f..1f) }
+            .drawBehind {
+                val w = 3.dp.toPx()
+                val inset = Offset(w / 2, w / 2)
+                val arc = Size(size.width - w, size.height - w)
+                drawArc(Ink.Four.copy(alpha = 0.5f), 0f, 360f, false, inset, arc, style = Stroke(w))
+                drawArc(accent, -90f, 360f * Updater.progress, false, inset, arc, style = Stroke(w, cap = StrokeCap.Round))
+            },
+    )
 }
 
 /** What the computer says about itself, asked once the page is open and the computer answers. */

@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import com.velocity.impulse.data.AnswerService
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Shared
+import com.velocity.impulse.data.Updater
 import com.velocity.impulse.ui.App
 
 class MainActivity : ComponentActivity() {
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (savedInstanceState == null) handle(intent)
+        Updater.daily(this)
         setContent {
             Bars()
             App(model)
@@ -76,6 +78,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         model.onScreen(true)
         model.resume()
+        Updater.resume(this)
     }
 
     override fun onPause() {

@@ -49,7 +49,6 @@ import androidx.compose.foundation.content.TransferableContent
 import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -133,13 +132,17 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -154,9 +157,10 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -175,6 +179,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -983,7 +988,8 @@ private fun Thinking(
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AnimatedContent(active, transitionSpec = { textRoll(calm) using SizeTransform(clip = false) }, label = "think") { a ->
+            // Clipped, so the leaving line never rolls over the thought below while the block folds.
+            AnimatedContent(active, transitionSpec = { textRoll(calm) using SizeTransform(clip = true) }, label = "think") { a ->
                 if (a) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Shimmer(tr("Thinking", "Myśli"), calm || !flowing)
@@ -1032,24 +1038,22 @@ private fun Shimmer(text: String, still: Boolean, style: TextStyle = Type.Body) 
     val sweep = rememberInfiniteTransition(label = "shimmer").animateFloat(
         -0.6f, 1.6f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "sweep",
     )
-    BasicText(
-        text,
-        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
-            drawContent()
-            val w = size.width
-            val x = sweep.value * w
-            drawRect(
-                Brush.linearGradient(
-                    0f to Color.Transparent, 0.5f to Ink.One, 1f to Color.Transparent,
-                    start = Offset(x - w * 0.35f, 0f), end = Offset(x + w * 0.35f, 0f),
-                ),
-                blendMode = BlendMode.SrcAtop,
-            )
-        },
-        style = style.copy(color = Ink.Four),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+    val base = Ink.Four
+    val light = Ink.One
+    val brush = remember(sweep, base, light) { Sweep(sweep, base, light) }
+    BasicText(text, style = style.copy(brush = brush), maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/**
+ * The words' own paint: [base] with a band of [light] centred at [at] (0 to 1 across the text).
+ * The text reads [at] only while it draws, so the light moves without a new layout or composition.
+ */
+private class Sweep(private val at: State<Float>, private val base: Color, private val light: Color) : ShaderBrush() {
+    override fun createShader(size: Size): Shader {
+        val x = at.value * size.width
+        val half = max(1f, size.width * 0.35f)
+        return LinearGradientShader(Offset(x - half, 0f), Offset(x + half, 0f), listOf(base, light, base))
+    }
 }
 
 private const val ThoughtRows = 5
@@ -1067,52 +1071,59 @@ private fun thoughtTail(t: String): String {
 }
 
 /**
- * The latest lines of a thought as it arrives. The window grows a line at a time up to
- * [ThoughtRows], then each new line pushes the others up and out under a soft fade. Height and
- * scroll are animated in layout, so the words recompose only when the thought changes.
+ * The latest lines of a thought as it arrives, in a clipped window as tall as its last
+ * [ThoughtRows] lines. New words push the text up by exactly what it grew and it glides back,
+ * so lines scroll up and out under a soft fade and never sit on each other. The window's height
+ * is animated in layout and the scroll on the text's own layer, so the words recompose only when
+ * the thought changes.
  */
 @Composable
 private fun ThoughtWindow(thought: () -> String, calm: Boolean) {
     val style = Type.Meta.copy(color = Ink.Three)
-    val line = with(LocalDensity.current) { style.lineHeight.toPx() }
     val scope = rememberCoroutineScope()
     val height = remember { Animatable(0f) }
     val slide = remember { Animatable(0f) }
-    var lines by remember { mutableIntStateOf(0) }
+    val tall = remember { floatArrayOf(0f) }
+    var over by remember { mutableStateOf(false) }
     val tail by remember { derivedStateOf { thoughtTail(thought()) } }
     val glide = spring(1f, 320f, 0.5f)
 
     BasicText(
         tail,
         Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp)
-            .clipToBounds()
-            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .graphicsLayer {
+                clip = true
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
             .drawWithContent {
                 drawContent()
-                if (lines >= ThoughtRows) {
-                    val h = 16.dp.toPx()
+                if (over) {
+                    val h = 18.dp.toPx()
                     drawRect(Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent, endY = h), size = Size(size.width, h), blendMode = BlendMode.DstOut)
                 }
             }
             .layout { measurable, c ->
                 val p = measurable.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
-                val h = height.value.roundToInt().coerceIn(c.minHeight, min(c.maxHeight, p.height))
-                layout(p.width, h) { p.place(0, h - p.height + slide.value.roundToInt()) }
+                val h = height.value.roundToInt().coerceIn(0, min(c.maxHeight, p.height))
+                layout(p.width, h) { p.placeWithLayer(0, h - p.height) { translationY = slide.value } }
             },
         style = style,
         onTextLayout = { r ->
             val n = r.lineCount
-            val was = lines
-            lines = n
-            val target = min(n, ThoughtRows) * line
-            if (calm || was == 0 || n < was) {
+            val full = r.size.height.toFloat()
+            val target = full - r.getLineTop(max(0, n - ThoughtRows))
+            val grew = full - tall[0]
+            val first = tall[0] == 0f
+            tall[0] = full
+            over = n > ThoughtRows
+            if (calm || first || grew < 0f) {
                 scope.launch {
                     slide.snapTo(0f)
                     height.snapTo(target)
                 }
-            } else if (n > was) {
+            } else if (grew > 0f) {
                 scope.launch {
-                    slide.snapTo(slide.value + (n - was) * line)
+                    slide.snapTo(slide.value + grew)
                     slide.animateTo(0f, glide)
                 }
                 if (height.targetValue != target) scope.launch { height.animateTo(target, glide) }
@@ -1858,7 +1869,7 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
         }
     }
     val tall = lines > 1 || attached.isNotEmpty() || editing != null
-    val corner by animateDpAsState(if (tall) 26.dp else 28.dp, spring(1f, 420f), label = "corner")
+    val corner by animateDpAsState(if (tall) 26.dp else 30.dp, spring(1f, 420f), label = "corner")
     val pill = RoundedCornerShape(corner)
     val glow = animateFloatAsState(if (streaming) 1f else 0f, tween(if (streaming) 500 else 800), label = "glow")
     val turn = remember { Animatable(0f) }
@@ -1871,25 +1882,19 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
         }
     }
 
-    if (adding) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { adding = false } })
+    val grow = remember(draft) { Animatable(0f) }
+    val plusAt = remember { mutableStateOf(Rect.Zero) }
 
     Column(
         Modifier.align(Alignment.BottomCenter).onSizeChanged { onHeight(it.height) }
-            .navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+            .navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
     ) {
-        AddMenu(
-            open = adding,
-            calm = calm,
-            onCamera = { adding = false; pickers.camera() },
-            onPhotos = { adding = false; pickers.photos() },
-            onFiles = { adding = false; pickers.files() },
-        )
         Column(
             Modifier.fillMaxWidth()
                 .animateContentSize(spring(1f, 500f))
                 .glass(shell.cardHaze, pill)
                 .workLight({ glow.value }, { turn.value }, pill, accent)
-                .padding(6.dp),
+                .padding(8.dp),
         ) {
             AnimatedVisibility(
                 editing != null,
@@ -1927,16 +1932,17 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
                     enter = fadeIn(tween(Motion.M2)) + expandHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
                     exit = fadeOut(tween(Motion.M1)) + shrinkHorizontally(spring(1f, 500f, IntSize.VisibilityThreshold)),
                 ) {
-                    val spin by animateFloatAsState(if (adding) 45f else 0f, spring(0.6f, 520f), label = "plus")
+                    // While the menu is open the island is the plus, so the plus itself steps aside.
                     IconBtn(
-                        Glyph.Plus, { adding = !adding },
-                        Modifier.graphicsLayer { rotationZ = spin },
-                        tint = if (adding) Ink.One else Ink.Two, fill = if (adding) Tone.Raise else Color.Transparent, size = 44.dp,
+                        Glyph.Plus, { adding = true },
+                        Modifier.onPlaced { plusAt.value = Rect(it.positionInRoot(), it.size.toSize()) }
+                            .graphicsLayer { alpha = if (grow.value > 0f) 0f else 1f },
+                        tint = Ink.Two, fill = Color.Transparent, size = 44.dp,
                     )
                 }
                 BasicTextField(
                     state = field,
-                    modifier = Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 11.dp)
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 11.dp)
                         .focusRequester(draft.focus)
                         .contentReceiver(receiver)
                         .onPreviewKeyEvent { e ->
@@ -2025,6 +2031,15 @@ private fun BoxScope.Composer(m: AppModel, toast: Toast, draft: Draft, landed: M
             )
         }
     }
+    AddIsland(
+        open = adding,
+        grow = grow,
+        plus = plusAt,
+        onClose = { adding = false },
+        onCamera = { adding = false; pickers.camera() },
+        onPhotos = { adding = false; pickers.photos() },
+        onFiles = { adding = false; pickers.files() },
+    )
 }
 
 /** Dictation beside send: the circle fills while it listens and breathes with the voice. */

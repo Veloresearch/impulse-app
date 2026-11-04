@@ -1,7 +1,11 @@
 package com.velocity.impulse.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -17,8 +21,10 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -29,10 +35,12 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -63,6 +71,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -70,6 +79,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.data.AppModel
 import com.velocity.impulse.data.Impulse
@@ -84,6 +94,7 @@ import com.velocity.impulse.ui.components.Field
 import com.velocity.impulse.ui.components.Glyph
 import com.velocity.impulse.ui.components.Group
 import com.velocity.impulse.ui.components.Icon
+import com.velocity.impulse.ui.components.IconBtn
 import com.velocity.impulse.ui.components.ModelFace
 import com.velocity.impulse.ui.components.OnAccent
 import com.velocity.impulse.ui.components.Roll
@@ -93,6 +104,8 @@ import com.velocity.impulse.ui.components.Toggle
 import com.velocity.impulse.ui.components.feel
 import com.velocity.impulse.ui.components.glass
 import com.velocity.impulse.ui.components.glassSource
+import com.velocity.impulse.ui.components.morph
+import com.velocity.impulse.ui.components.morphBody
 import com.velocity.impulse.ui.components.pressable
 import com.velocity.impulse.ui.theme.Ink
 import com.velocity.impulse.ui.theme.LocalAccent
@@ -111,28 +124,36 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
+/** A model's details and where they grew from, so they can shrink back into it. */
+private data class Opened(val origin: String, val probe: Probe)
+
+private const val LoadedOrigin = "models:loaded"
+
 /** The library on the computer and the models that can be fetched for it. */
 @Composable
 fun ModelsPage(m: AppModel) {
     val hub = remember { HubState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var picked by remember { mutableStateOf<Probe?>(null) }
-    var sheet by remember { mutableStateOf(false) }
+    var opened by remember { mutableStateOf<Opened?>(null) }
+    var showing by remember { mutableStateOf(false) }
     var hw by remember { mutableStateOf<JSONObject?>(null) }
     val calm = LocalReduceMotion.current
     LaunchedEffect(Unit) { m.ask({ hardware() }) { hw = it } }
     WatchDownloads(m, hub)
+    val out = opened?.origin?.takeIf { showing }
+    val open: (String, Probe) -> Unit = { origin, p ->
+        opened = Opened(origin, p)
+        showing = true
+    }
 
     PageFrame(
         tr("Models", "Modele"),
         overlay = {
-            Sheet(sheet, { sheet = false }) {
-                picked?.let { p -> key(p.path) { ModelSheet(m, p, hw) { sheet = false } } }
-            }
+            ModelCard(m, opened, showing, hw) { showing = false }
             HubSheets(m, hub)
         },
     ) {
-        LoadedCard(m, Modifier.rise(0)) { p -> picked = p; sheet = true }
+        LoadedCard(m, out == LoadedOrigin, Modifier.rise(0)) { p -> open(LoadedOrigin, p) }
         Segmented(
             listOf(tr("On the computer", "Na komputerze"), tr("Find models", "Znajdź modele")),
             tab,
@@ -151,17 +172,17 @@ fun ModelsPage(m: AppModel) {
             label = "tab",
         ) { t ->
             Column(verticalArrangement = Arrangement.spacedBy(Space.S4)) {
-                if (t == 0) Library(m, hub, { tab = 1 }) { p -> picked = p; sheet = true }
+                if (t == 0) Library(m, hub, out, { tab = 1 }, open)
                 else HubBody(m, hub)
             }
         }
     }
 }
 
-/** What is loaded, or loading, as the page's first island; Unload sits on it. */
+/** What is loaded, or loading, as the page's first island; Unload sits on it and its details grow out of it. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LoadedCard(m: AppModel, modifier: Modifier, onOpen: (Probe) -> Unit) {
+private fun LoadedCard(m: AppModel, out: Boolean, modifier: Modifier, onOpen: (Probe) -> Unit) {
     val l = m.status?.model
     val loading = m.loading
     val calm = LocalReduceMotion.current
@@ -187,72 +208,89 @@ private fun LoadedCard(m: AppModel, modifier: Modifier, onOpen: (Probe) -> Unit)
         }
     }
     val p = l?.let { x -> m.library.firstOrNull { samePath(it.path, x.path) } }
-    Column(
-        modifier.fillMaxWidth()
-            .pressable({ p?.let(onOpen) }, Shapes.Card, Tone.Panel, if (p != null) Tone.Raise else Tone.Panel, depth = if (p != null) 0.985f else 1f, feel = if (p != null) Feel.Tap else null, tilt = if (p != null) 2f else 0f)
-            .padding(Space.S4),
-    ) {
-        AnimatedContent(
-            loading ?: l?.path,
-            Modifier.fillMaxWidth(),
-            transitionSpec = {
-                val enter = if (calm) fadeIn(tween(Motion.M2))
-                else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 } + scaleIn(Motion.calmText(), 0.97f)
-                enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
-            },
-            label = "loaded",
-        ) { shown ->
-            val coming = loading != null && shown == loading
-            val name = if (coming) m.library.firstOrNull { samePath(it.path, shown) }?.name ?: shown.orEmpty().substringAfterLast('/').substringAfterLast('\\') else l?.name
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (name == null) {
-                        Box(Modifier.size(52.dp).background(Tone.Hover, Squircle(52.dp * 0.22f)), contentAlignment = Alignment.Center) {
-                            Icon(Glyph.Models, Ink.Three, size = 22.dp)
+    Source(out, modifier) {
+        Column(
+            Modifier.morph(LoadedOrigin, this, Shapes.Card)
+                .fillMaxWidth()
+                .pressable({ p?.let(onOpen) }, Shapes.Card, Tone.Panel, if (p != null) Tone.Raise else Tone.Panel, depth = if (p != null) 0.985f else 1f, feel = if (p != null) Feel.Tap else null, tilt = if (p != null) 2f else 0f)
+                .padding(Space.S4),
+        ) {
+            AnimatedContent(
+                loading ?: l?.path,
+                Modifier.fillMaxWidth(),
+                transitionSpec = {
+                    val enter = if (calm) fadeIn(tween(Motion.M2))
+                    else fadeIn(tween(Motion.M2)) + slideInVertically(Motion.calmText()) { it / 6 } + scaleIn(Motion.calmText(), 0.97f)
+                    enter togetherWith fadeOut(tween(Motion.M1)) using SizeTransform(clip = true)
+                },
+                label = "loaded",
+            ) { shown ->
+                val coming = loading != null && shown == loading
+                val name = if (coming) m.library.firstOrNull { samePath(it.path, shown) }?.name ?: shown.orEmpty().substringAfterLast('/').substringAfterLast('\\') else l?.name
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (name == null) {
+                            Box(Modifier.size(52.dp).background(Tone.Hover, Squircle(52.dp * 0.22f)), contentAlignment = Alignment.Center) {
+                                Icon(Glyph.Models, Ink.Three, size = 22.dp)
+                            }
+                        } else {
+                            ModelFace(m, name, if (coming) "" else l?.family.orEmpty(), 52.dp)
                         }
-                    } else {
-                        ModelFace(m, name, if (coming) "" else l?.family.orEmpty(), 52.dp)
+                        Spacer(Modifier.width(Space.S3))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Section, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            BasicText(
+                                when {
+                                    coming -> tr("Loading on the computer", "Wczytuję na komputerze")
+                                    name == null -> tr("Pick one below to load it", "Wybierz poniżej, żeby go wczytać")
+                                    else -> p?.let(::modelLine) ?: tr("Ready", "Gotowy")
+                                },
+                                style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (coming || l != null) {
+                            Spacer(Modifier.width(Space.S2))
+                            LoadButton(loadState(coming, l != null), {}, { m.unload() }, enabled = loading == null, size = 40.dp)
+                        }
                     }
-                    Spacer(Modifier.width(Space.S3))
-                    Column(Modifier.weight(1f)) {
-                        BasicText(name ?: tr("No model loaded", "Nie wczytano modelu"), style = Type.Section, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        BasicText(
-                            when {
-                                coming -> tr("Loading on the computer", "Wczytuję na komputerze")
-                                name == null -> tr("Pick one below to load it", "Wybierz poniżej, żeby go wczytać")
-                                else -> p?.let(::modelLine) ?: tr("Ready", "Gotowy")
-                            },
-                            style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (coming) {
-                        Spinner(LocalAccent.current, 18.dp)
-                    } else if (l != null) {
-                        Spacer(Modifier.width(Space.S2))
-                        Pill(tr("Unload", "Zwolnij"), { m.unload() }, fill = Tone.Hover, enabled = loading == null, height = 36.dp)
-                    }
-                }
-                if (!coming && l != null) {
-                    Spacer(Modifier.height(Space.S3))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Badge(tr("${tokens(l.context.toLong())} per chat", "${tokens(l.context.toLong())} na czat"))
-                        if (l.thinks) Badge(tr("Thinking", "Myślenie"), Glyph.Brain)
-                        if (l.vision) Badge(tr("Vision", "Obraz"), Glyph.Eye)
+                    if (!coming && l != null) {
+                        Spacer(Modifier.height(Space.S3))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Badge(tr("${tokens(l.context.toLong())} per chat", "${tokens(l.context.toLong())} na czat"))
+                            if (l.thinks) Badge(tr("Thinking", "Myślenie"), Glyph.Brain)
+                            if (l.vision) Badge(tr("Vision", "Obraz"), Glyph.Eye)
+                        }
                     }
                 }
             }
+            AnimatedVisibility(loading != null && secs > 0, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
+                Roll(tr("$secs s", "$secs s"), Type.Meta, Modifier.padding(top = Space.S2), digits = true)
+            }
+            Reveal(failed != null) {
+                BasicText(failed.orEmpty(), Modifier.padding(top = Space.S3), style = Type.Meta.copy(color = Signal.Err))
+            }
         }
-        AnimatedVisibility(loading != null && secs > 0, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
-            Roll(tr("$secs s", "$secs s"), Type.Meta, Modifier.padding(top = Space.S2), digits = true)
-        }
-        Reveal(failed != null) {
-            BasicText(failed.orEmpty(), Modifier.padding(top = Space.S3), style = Type.Meta.copy(color = Signal.Err))
+    }
+}
+
+/**
+ * Wraps what a model's details grow out of. It hides while it "is" the card and comes back as the
+ * card shrinks into it; its space is held meanwhile so the list never closes up.
+ */
+@Composable
+private fun Source(out: Boolean, modifier: Modifier = Modifier, content: @Composable AnimatedVisibilityScope.() -> Unit) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val d = LocalDensity.current
+    val calm = LocalReduceMotion.current
+    Box(modifier.fillMaxWidth().defaultMinSize(with(d) { size.width.toDp() }, with(d) { size.height.toDp() })) {
+        AnimatedVisibility(!out || calm, enter = EnterTransition.None, exit = ExitTransition.None) {
+            Box(Modifier.onSizeChanged { size = it }) { content() }
         }
     }
 }
 
 @Composable
-private fun Library(m: AppModel, hub: HubState, onDownloads: () -> Unit, onOpen: (Probe) -> Unit) {
+private fun Library(m: AppModel, hub: HubState, out: String?, onDownloads: () -> Unit, onOpen: (String, Probe) -> Unit) {
     Arriving(hub, onDownloads)
     if (m.library.isEmpty()) {
         Empty(
@@ -276,7 +314,14 @@ private fun Library(m: AppModel, hub: HubState, onDownloads: () -> Unit, onOpen:
     for ((publisher, rows) in groups) {
         key(publisher.orEmpty()) {
             Group("${publisher ?: tr("Other", "Inne")} · ${rows.size}") {
-                rows.forEach { p -> key(p.path) { ModelRow(m, p) { onOpen(p) } } }
+                rows.forEach { p ->
+                    key(p.path) {
+                        val origin = "models:${p.path}"
+                        Source(out == origin) {
+                            Box(Modifier.morph(origin, this, RectangleShape)) { ModelRow(m, p) { onOpen(origin, p) } }
+                        }
+                    }
+                }
             }
         }
     }
@@ -300,15 +345,10 @@ private fun Arriving(hub: HubState, onClick: () -> Unit) {
 
 @Composable
 private fun ModelRow(m: AppModel, p: Probe, onClick: () -> Unit) {
-    val accent = LocalAccent.current
     val loaded = samePath(m.status?.model?.path, p.path)
     val loading = samePath(m.loading, p.path)
     Item(p.name, modelLine(p), onClick, leading = { ModelFace(m, p.name, p.family, 40.dp) }) {
-        when {
-            loading -> Spinner(accent, 16.dp)
-            loaded -> BasicText(tr("Loaded", "Wczytany"), style = Type.Label.copy(color = accent, fontWeight = FontWeight.SemiBold))
-            else -> Icon(Glyph.Right, Ink.Four, size = 16.dp)
-        }
+        LoadButton(loadState(loading, loaded), { m.load(p) }, { m.unload() }, enabled = m.loading == null)
     }
 }
 
@@ -343,14 +383,49 @@ private fun fitOf(plan: Plan, layers: Int, gpu: Boolean): Fit {
     }
 }
 
+/** The details card: it grows out of the row or card it was opened from and shrinks back into it. */
+@Composable
+private fun BoxScope.ModelCard(m: AppModel, opened: Opened?, showing: Boolean, hw: JSONObject?, onClose: () -> Unit) {
+    val calm = LocalReduceMotion.current
+    val tall = LocalConfiguration.current.screenHeightDp.dp * 0.88f
+    BackHandler(showing, onClose)
+    AnimatedVisibility(showing, Modifier.matchParentSize(), enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M2))) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable(remember { MutableInteractionSource() }, null) { onClose() })
+    }
+    AnimatedVisibility(
+        showing && opened != null,
+        Modifier.align(Alignment.BottomCenter),
+        enter = if (calm) fadeIn(tween(Motion.M2)) else EnterTransition.None,
+        exit = if (calm) fadeOut(tween(Motion.M2)) else ExitTransition.None,
+    ) {
+        val o = opened ?: return@AnimatedVisibility
+        Column(
+            Modifier.navigationBarsPadding()
+                .padding(Space.S2)
+                .morph(o.origin, this, Shapes.Sheet)
+                .background(Tone.Float, Shapes.Sheet)
+                .fillMaxWidth()
+                .heightIn(max = tall)
+                .morphBody()
+                .verticalScroll(rememberScrollState())
+                .padding(Space.S4),
+            verticalArrangement = Arrangement.spacedBy(Space.S4),
+        ) {
+            key(o.probe.path) { ModelDetails(m, o.probe, hw, onClose) }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelSheet(m: AppModel, p: Probe, hw: JSONObject?, onClose: () -> Unit) {
+private fun ModelDetails(m: AppModel, p: Probe, hw: JSONObject?, onClose: () -> Unit) {
     val loadedNow = m.status?.model
     val isLoaded = samePath(loadedNow?.path, p.path)
     val mfy = p.format == "mfy"
     val sizes = remember(p.trainContext) { sizesFor(p.trainContext) }
     var context by remember { mutableIntStateOf(defaultSize(sizes, loadedNow?.context?.takeIf { isLoaded })) }
+    var pinned by remember { mutableStateOf<Int?>(null) }
+    val steps = remember(sizes, pinned) { (sizes + listOfNotNull(pinned)).distinct().sorted() }
     var backend by remember { mutableStateOf("auto") }
     var gpu by remember { mutableStateOf<Int?>(null) }
     var moe by remember { mutableStateOf<Int?>(null) }
@@ -363,13 +438,15 @@ private fun ModelSheet(m: AppModel, p: Probe, hw: JSONObject?, onClose: () -> Un
     var speed by remember { mutableStateOf<Pair<Double, Int>?>(null) }
     var removing by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
-    var more by remember { mutableStateOf(false) }
 
     LaunchedEffect(p.path) {
         m.ask({ modelSettings(p.path) }) { s ->
             saved = s
             if (s == null) return@ask
-            s.optInt("context").takeIf { it > 0 }?.let { context = it }
+            s.optInt("context").takeIf { it > 0 }?.let {
+                context = it
+                pinned = it
+            }
             backend = s.optString("backend").takeIf { it in Backends } ?: "auto"
             gpu = if (s.has("gpu_layers") && !s.isNull("gpu_layers")) s.optInt("gpu_layers") else null
             moe = s.optJSONObject("tuning")?.takeIf { it.has("n_cpu_moe") && !it.isNull("n_cpu_moe") }?.optInt("n_cpu_moe")
@@ -400,112 +477,107 @@ private fun ModelSheet(m: AppModel, p: Probe, hw: JSONObject?, onClose: () -> Un
     val layers = info?.optInt("layers") ?: 0
     val experts = info?.optInt("experts") ?: 0
     val unloadable = info?.optString("unloadable")?.takeIf { it.isNotBlank() && it != "null" }
-    val tall = LocalConfiguration.current.screenHeightDp.dp * 0.8f
+    val sees = info?.optString("projector")?.let { it.isNotBlank() && it != "null" } == true
+    val thinks = isLoaded && loadedNow?.thinks == true
 
-    Column(Modifier.heightIn(max = tall).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.S4)) {
-        Row(Modifier.padding(top = Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            ModelFace(m, p.name, p.family, 52.dp)
-            Spacer(Modifier.width(Space.S3))
-            Column(Modifier.weight(1f)) {
-                BasicText(p.name, style = Type.BrandSection, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                BasicText(publisherOf(p) ?: p.family.ifBlank { p.format.uppercase() }, style = Type.Meta, maxLines = 1)
-            }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ModelFace(m, p.name, p.family, 52.dp)
+        Spacer(Modifier.width(Space.S3))
+        Column(Modifier.weight(1f)) {
+            BasicText(p.name, style = Type.BrandSection, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            BasicText(publisherOf(p) ?: p.family.ifBlank { p.format.uppercase() }, style = Type.Meta, maxLines = 1)
         }
-
-        Group {
-            Item(tr("Size on disk", "Rozmiar na dysku"), gb(p.bytes), ground = Tone.Raise)
-            Item(tr("Compression", "Kompresja"), quantOf(p), ground = Tone.Raise)
-            if (p.params > 0) Item(tr("Parameters", "Parametry"), params(p.params), ground = Tone.Raise)
-            if (p.trainContext > 0) Item(tr("Longest chat it was trained on", "Najdłuższy czat z treningu"), tokens(p.trainContext.toLong()), ground = Tone.Raise)
-            if (experts > 0) {
-                val used = info?.optInt("experts_used") ?: 0
-                Item(tr("Mixture of experts", "Mieszanka ekspertów"), tr("$used of $experts experts for each token", "$used z $experts ekspertów na token"), ground = Tone.Raise)
-            }
-            if (info != null) {
-                val sees = info.optString("projector").let { it.isNotBlank() && it != "null" }
-                Item(tr("Pictures", "Obrazy"), if (sees) tr("Can look at pictures", "Widzi obrazy") else tr("Text only", "Tylko tekst"), ground = Tone.Raise)
-            }
-            Item(
-                tr("Writing speed", "Szybkość pisania"),
-                speed?.let { (v, n) -> "%.1f ".format(v) + tr("tokens/s · median of $n answers", "tokenów/s · mediana z $n odpowiedzi") }
-                    ?: tr("Nothing measured yet. Load it and ask something.", "Jeszcze nie zmierzono. Wczytaj go i zapytaj o coś."),
-                ground = Tone.Raise,
-            )
+        Spacer(Modifier.width(Space.S2))
+        IconBtn(Glyph.Close, onClose, size = 36.dp)
+    }
+    if (thinks || sees) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (thinks) Badge(tr("Thinking", "Myślenie"), Glyph.Brain)
+            if (sees) Badge(tr("Vision", "Obraz"), Glyph.Eye)
         }
+    }
 
-        if (unloadable != null) {
-            Note(tr("This file cannot load", "Tego pliku nie da się wczytać"), unloadable, Signal.Err)
-        } else if (!mfy) {
-            RunCard(plan, planProblem, context, layers, hw)
+    Group {
+        if (p.params > 0) Item(tr("Parameters", "Parametry"), params(p.params), ground = Tone.Raise)
+        Item(tr("Compression", "Kompresja"), quantOf(p), ground = Tone.Raise)
+        Item(tr("Size on disk", "Rozmiar na dysku"), gb(p.bytes), ground = Tone.Raise)
+        if (p.trainContext > 0) Item(tr("Longest chat it was trained on", "Najdłuższy czat z treningu"), tokens(p.trainContext.toLong()), ground = Tone.Raise)
+        if (experts > 0) {
+            val used = info?.optInt("experts_used") ?: 0
+            Item(tr("Mixture of experts", "Mieszanka ekspertów"), tr("$used of $experts experts for each token", "$used z $experts ekspertów na token"), ground = Tone.Raise)
         }
+        speed?.let { (v, n) ->
+            Item(tr("Writing speed", "Szybkość pisania"), "%.1f ".format(v) + tr("tokens/s · median of $n answers", "tokenów/s · mediana z $n odpowiedzi"), ground = Tone.Raise)
+        }
+    }
 
-        if (unloadable == null) {
-            if (!mfy) {
-                Column {
-                    BasicText(tr("Window per chat", "Okno na czat"), Modifier.padding(start = Space.S1, bottom = Space.S2), style = Type.Label)
-                    val shown = remember(sizes, context) { (sizes + context).distinct().sorted() }
-                    Chips(shown.map(::windowLabel), shown.indexOf(context), { context = shown[it] })
+    if (unloadable != null) {
+        Note(tr("This file cannot load", "Tego pliku nie da się wczytać"), unloadable, Signal.Err)
+    } else if (!mfy) {
+        RunCard(plan, planProblem, context, layers, hw)
+    }
+
+    if (unloadable == null) {
+        if (!mfy) {
+            Column(
+                Modifier.fillMaxWidth().background(Tone.Raise, Shapes.Tile).padding(Space.S4),
+                verticalArrangement = Arrangement.spacedBy(Space.S4),
+            ) {
+                Window(steps, context, p.trainContext) { context = it }
+                Column(verticalArrangement = Arrangement.spacedBy(Space.S2)) {
+                    BasicText(tr("Engine", "Silnik"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+                    Segmented(
+                        listOf(tr("Automatic", "Auto"), "llama.cpp", tr("Experts", "Eksperci")),
+                        Backends.indexOf(backend).coerceAtLeast(0),
+                        { backend = Backends[it] },
+                    )
                 }
-                Group {
-                    Unfold(
-                        tr("More load options", "Więcej opcji wczytania"),
-                        more,
-                        { more = !more },
-                        detail = listOfNotNull(
-                            backend.takeIf { it != "auto" }?.let(::backendLabel),
-                            gpu?.let { tr("$it layers on the card", "$it warstw na karcie") },
-                            moe?.let { tr("$it expert layers on the processor", "$it warstw ekspertów na procesorze") },
-                        ).joinToString(" · ").ifEmpty { tr("Automatic", "Automatycznie") },
-                    ) {
-                        BasicText(tr("Engine", "Silnik"), style = Type.Label)
-                        Segmented(
-                            listOf(tr("Automatic", "Auto"), "llama.cpp", tr("Experts", "Eksperci")),
-                            Backends.indexOf(backend).coerceAtLeast(0),
-                            { backend = Backends[it] },
-                        )
-                        Spacer(Modifier.height(Space.S2))
-                        Steps(
-                            tr("Layers on the graphics card", "Warstwy na karcie graficznej"),
-                            gpu, layers,
-                            { n -> tr("$n of $layers", "$n z $layers") },
-                        ) { gpu = it }
-                        if (experts > 0) {
-                            Steps(
-                                tr("Expert layers on the processor", "Warstwy ekspertów na procesorze"),
-                                moe, layers,
-                                { n -> tr("$n of $layers", "$n z $layers") },
-                            ) { moe = it }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                BasicText(tr("Remember these", "Zapamiętaj"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
-                                BasicText(tr("Loads this model this way next time", "Następnym razem wczyta ten model tak samo"), style = Type.Meta)
-                            }
-                            Toggle(keep, { keep = it }, description = tr("Remember these", "Zapamiętaj"))
-                        }
-                        if (saved != null) {
-                            Pill(tr("Reset to recommended", "Przywróć zalecane"), {
-                                m.ask({ modelSettings(p.path, reset = true) }, { problem = it }) {
-                                    saved = null
-                                    backend = "auto"
-                                    gpu = null
-                                    moe = null
-                                    context = defaultSize(sizes, null)
-                                }
-                            }, Modifier.fillMaxWidth(), ink = Ink.Two, fill = Tone.Hover)
-                        }
+                Steps(
+                    tr("Layers on the graphics card", "Warstwy na karcie graficznej"),
+                    gpu, layers,
+                    { n -> tr("$n of $layers", "$n z $layers") },
+                ) { gpu = it }
+                if (experts > 0) {
+                    Steps(
+                        tr("Expert layers on the processor", "Warstwy ekspertów na procesorze"),
+                        moe, layers,
+                        { n -> tr("$n of $layers", "$n z $layers") },
+                    ) { moe = it }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        BasicText(tr("Remember these", "Zapamiętaj"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+                        BasicText(tr("Loads this model this way next time", "Następnym razem wczyta ten model tak samo"), style = Type.Meta)
                     }
+                    Toggle(keep, { keep = it }, description = tr("Remember these", "Zapamiętaj"))
+                }
+                if (saved != null) {
+                    Pill(tr("Reset to recommended", "Przywróć zalecane"), {
+                        m.ask({ modelSettings(p.path, reset = true) }, { problem = it }) {
+                            saved = null
+                            backend = "auto"
+                            gpu = null
+                            moe = null
+                            pinned = null
+                            context = defaultSize(sizes, null)
+                        }
+                    }, Modifier.fillMaxWidth(), ink = Ink.Two, fill = Tone.Hover)
                 }
             }
-            val same = isLoaded && loadedNow?.context == context && saved?.optString("backend").orEmpty().ifBlank { "auto" } == backend
-            Pill(
-                when {
-                    samePath(m.loading, p.path) -> tr("Loading", "Wczytuję")
-                    isLoaded && same -> tr("Loaded", "Wczytany")
-                    isLoaded -> tr("Load again with ${windowLabel(context)}", "Wczytaj ponownie z ${windowLabel(context)}")
-                    else -> tr("Load", "Wczytaj")
-                },
-                {
+        }
+        val same = isLoaded && loadedNow?.context == context && saved?.optString("backend").orEmpty().ifBlank { "auto" } == backend
+        val unload = isLoaded && same
+        Pill(
+            when {
+                samePath(m.loading, p.path) -> tr("Loading", "Wczytuję")
+                unload -> tr("Unload", "Zwolnij")
+                isLoaded -> tr("Load again with ${windowLabel(context)}", "Wczytaj ponownie z ${windowLabel(context)}")
+                else -> tr("Load", "Wczytaj")
+            },
+            {
+                if (unload) {
+                    m.unload()
+                } else {
                     if (mfy) {
                         m.load(p)
                     } else {
@@ -514,59 +586,59 @@ private fun ModelSheet(m: AppModel, p: Probe, hw: JSONObject?, onClose: () -> Un
                         m.load(p.path, p.name, context, gpu, backend.takeIf { it != "auto" }, tuning.takeIf { it.length() > 0 }, keep)
                     }
                     onClose()
-                },
-                Modifier.fillMaxWidth(),
-                ink = OnAccent,
-                fill = LocalAccent.current,
-                enabled = m.loading == null && !(isLoaded && same),
-                height = 50.dp,
-            )
-        }
-
-        Group {
-            SwitchRow(
-                tr("Think before answering", "Myśl przed odpowiedzią"),
-                tr("For this model, when the chat's thinking is on. Off goes straight to the answer.", "Dla tego modelu, gdy myślenie w czacie jest włączone. Wyłączone od razu odpowiada."),
-                thinking,
-                ground = Tone.Raise,
-            ) { v ->
-                thinking = v
-                m.ask({ modelSettings(p.path, thinking = v) }, { problem = it; thinking = !v })
-            }
-        }
-
-        Reveal(!confirm) {
-            Pill(
-                if (removing) tr("Deleting", "Usuwam") else tr("Delete from the computer", "Usuń z komputera"),
-                { confirm = true },
-                Modifier.fillMaxWidth(),
-                ink = Signal.Err,
-                enabled = !isLoaded && !removing,
-            )
-        }
-        Reveal(confirm) {
-            Column(Modifier.fillMaxWidth().background(Tone.Raise, Shapes.Tile).padding(Space.S4), verticalArrangement = Arrangement.spacedBy(Space.S2)) {
-                BasicText(tr("Delete ${p.name}?", "Usunąć ${p.name}?"), style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
-                BasicText(
-                    tr("The file (${gb(p.bytes)}) is removed from the computer's disk. Getting it back means downloading it again.", "Plik (${gb(p.bytes)}) zniknie z dysku komputera. Odzyskanie go to ponowne pobranie."),
-                    style = Type.Meta,
-                )
-                Row(Modifier.padding(top = Space.S1), horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
-                    Pill(tr("Keep", "Zostaw"), { confirm = false }, Modifier.weight(1f), fill = Tone.Hover)
-                    Pill(tr("Delete", "Usuń"), {
-                        confirm = false
-                        removing = true
-                        m.ask({ removeModel(p.path) }, { problem = it; removing = false }) {
-                            m.refreshAll()
-                            onClose()
-                        }
-                    }, Modifier.weight(1f), ink = Signal.Err, fill = Tone.Hover)
                 }
+            },
+            Modifier.fillMaxWidth(),
+            ink = if (unload) Ink.One else OnAccent,
+            fill = if (unload) Tone.Hover else LocalAccent.current,
+            enabled = m.loading == null,
+            height = 50.dp,
+        )
+    }
+
+    Group {
+        SwitchRow(
+            tr("Think before answering", "Myśl przed odpowiedzią"),
+            tr("For this model, when the chat's thinking is on. Off goes straight to the answer.", "Dla tego modelu, gdy myślenie w czacie jest włączone. Wyłączone od razu odpowiada."),
+            thinking,
+            ground = Tone.Raise,
+        ) { v ->
+            thinking = v
+            m.ask({ modelSettings(p.path, thinking = v) }, { problem = it; thinking = !v })
+        }
+    }
+
+    Reveal(!confirm) {
+        Pill(
+            if (removing) tr("Deleting", "Usuwam") else tr("Delete from the computer", "Usuń z komputera"),
+            { confirm = true },
+            Modifier.fillMaxWidth(),
+            ink = Signal.Err,
+            enabled = !isLoaded && !removing,
+        )
+    }
+    Reveal(confirm) {
+        Column(Modifier.fillMaxWidth().background(Tone.Raise, Shapes.Tile).padding(Space.S4), verticalArrangement = Arrangement.spacedBy(Space.S2)) {
+            BasicText(tr("Delete ${p.name}?", "Usunąć ${p.name}?"), style = Type.Body.copy(fontWeight = FontWeight.SemiBold))
+            BasicText(
+                tr("The file (${gb(p.bytes)}) is removed from the computer's disk. Getting it back means downloading it again.", "Plik (${gb(p.bytes)}) zniknie z dysku komputera. Odzyskanie go to ponowne pobranie."),
+                style = Type.Meta,
+            )
+            Row(Modifier.padding(top = Space.S1), horizontalArrangement = Arrangement.spacedBy(Space.S2)) {
+                Pill(tr("Keep", "Zostaw"), { confirm = false }, Modifier.weight(1f), fill = Tone.Hover)
+                Pill(tr("Delete", "Usuń"), {
+                    confirm = false
+                    removing = true
+                    m.ask({ removeModel(p.path) }, { problem = it; removing = false }) {
+                        m.refreshAll()
+                        onClose()
+                    }
+                }, Modifier.weight(1f), ink = Signal.Err, fill = Tone.Hover)
             }
         }
-        if (isLoaded) BasicText(tr("Unload it first to delete it.", "Najpierw go zwolnij, żeby usunąć."), Modifier.fillMaxWidth(), style = Type.Meta.copy(textAlign = TextAlign.Center))
-        Problem(problem)
     }
+    if (isLoaded) BasicText(tr("Unload it first to delete it.", "Najpierw go zwolnij, żeby usunąć."), Modifier.fillMaxWidth(), style = Type.Meta.copy(textAlign = TextAlign.Center))
+    Problem(problem)
 }
 
 @Composable
@@ -623,6 +695,32 @@ private fun Steps(title: String, value: Int?, max: Int, label: (Int) -> String, 
             Chips(listOf(tr("Auto", "Auto")), if (value == null) 0 else -1, { onChange(null) })
         }
         if (max > 0) Slider(value ?: 0, max, { onChange(it) }, dim = value == null)
+    }
+}
+
+/** The window per chat on a slider that steps through sizes that make sense, up to what it was trained on. */
+@Composable
+private fun Window(steps: List<Int>, value: Int, trained: Int, onChange: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.S1)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                BasicText(tr("Window per chat", "Okno na czat"), style = Type.Body.copy(fontWeight = FontWeight.Medium))
+                BasicText(
+                    if (trained > 0) tr("Trained on up to ${tokens(trained.toLong())}", "Trenowany do ${tokens(trained.toLong())}")
+                    else tr("A larger window reserves more memory", "Większe okno rezerwuje więcej pamięci"),
+                    style = Type.Meta,
+                )
+            }
+            Roll(windowLabel(value), Type.Section, digits = true)
+        }
+        if (steps.size > 1) {
+            Slider(steps.indexOf(value).coerceAtLeast(0), steps.lastIndex, { onChange(steps[it]) })
+            Row {
+                BasicText(windowLabel(steps.first()), style = Type.Label)
+                Spacer(Modifier.weight(1f))
+                BasicText(windowLabel(steps.last()), style = Type.Label)
+            }
+        }
     }
 }
 
@@ -888,10 +986,4 @@ private fun windowLabel(n: Int): String = when {
     n >= 1_048_576 && n % 1_048_576 == 0 -> "${n / 1_048_576}M"
     n >= 1024 -> "${(n / 1024.0).roundToInt()}K"
     else -> "$n"
-}
-
-private fun backendLabel(b: String) = when (b) {
-    "llamacpp" -> "llama.cpp"
-    "freetoken" -> tr("Mixture-of-experts engine", "Silnik mieszanki ekspertów")
-    else -> b
 }

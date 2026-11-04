@@ -18,6 +18,11 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Tag matches the app version
+        run: |
+          app=$(sed -n 's/^val appVersion = "\(.*\)"$//p' app/build.gradle.kts)
+          [ "v$app" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME does not match appVersion $app in app/build.gradle.kts"; exit 1; }
+
       - name: Signing key
         env:
           KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}

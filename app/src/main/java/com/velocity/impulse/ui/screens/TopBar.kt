@@ -73,10 +73,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -88,7 +91,6 @@ import com.velocity.impulse.data.Probe
 import com.velocity.impulse.ui.Chrome
 import com.velocity.impulse.ui.Lang.tr
 import com.velocity.impulse.ui.LocalShell
-import com.velocity.impulse.ui.Pill
 import com.velocity.impulse.ui.Shell
 import com.velocity.impulse.ui.Surface
 import com.velocity.impulse.ui.components.Feel
@@ -317,14 +319,79 @@ private fun Fold(shell: Shell, shown: () -> Float, content: @Composable () -> Un
 @Composable
 fun Spinner(color: Color, size: Dp = 14.dp) = Arc(color, Modifier.size(size)) { 0f }
 
-/** A spinning arc whose sweep breathes; [whole] 0..1 grows it into a closed ring. */
+internal enum class LoadState { Idle, Loading, Loaded }
+
+internal fun loadState(loading: Boolean, loaded: Boolean) = when {
+    loading -> LoadState.Loading
+    loaded -> LoadState.Loaded
+    else -> LoadState.Idle
+}
+
+/**
+ * One round button per model: a play mark loads it, a ring with a stop square inside turns while
+ * it loads, and a filled stop square unloads it. The marks bend into each other in the draw pass,
+ * so the row around it is never composed again while it moves.
+ */
 @Composable
-private fun Arc(color: Color, modifier: Modifier, whole: () -> Float) {
+internal fun LoadButton(state: LoadState, onLoad: () -> Unit, onUnload: () -> Unit, enabled: Boolean, size: Dp = 36.dp) {
+    val accent = LocalAccent.current
+    val spec = if (LocalShell.current.calm) tween<Float>(Motion.M2) else spring<Float>(0.72f, 520f)
+    val square = animateFloatAsState(if (state == LoadState.Idle) 0f else 1f, spec, label = "square")
+    val filled = animateFloatAsState(if (state == LoadState.Loaded) 1f else 0f, spec, label = "filled")
+    val busy = animateFloatAsState(if (state == LoadState.Loading) 1f else 0f, spec, label = "busy")
+    val ground = Tone.Hover
+    val ink = Ink.One
+    val path = remember { Path() }
+    val spoken = when (state) {
+        LoadState.Idle -> tr("Load", "Wczytaj")
+        LoadState.Loading -> tr("Loading", "Wczytuję")
+        LoadState.Loaded -> tr("Unload", "Zwolnij")
+    }
+    // shortcut: the service cannot stop a load in flight, so the stop square only shows it is busy; take the tap once it can.
+    val live = enabled && state != LoadState.Loading
+    Box(
+        Modifier.size(size)
+            .semantics { contentDescription = spoken }
+            .graphicsLayer { alpha = if (live || state == LoadState.Loading) 1f else 0.45f }
+            .pressable(
+                { if (state == LoadState.Loaded) onUnload() else onLoad() },
+                CircleShape, depth = 0.86f, enabled = live, stretch = true,
+                feel = if (state == LoadState.Loaded) Feel.Off else Feel.On,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (state == LoadState.Loading) Arc(accent, Modifier.matchParentSize(), thin = 0.08f) { 0f }
+        Canvas(Modifier.matchParentSize()) {
+            val q = square.value
+            val f = filled.value
+            val b = busy.value.coerceIn(0f, 1f)
+            val r = this.size.minDimension / 2
+            drawCircle(lerp(ground, accent, f.coerceIn(0f, 1f)).let { it.copy(alpha = it.alpha * (1f - b)) }, r)
+            val h = r * 0.34f * (1f - 0.28f * b)
+            val tip = h * (0.8f + 0.2f * q)
+            val shift = h * 0.2f * (1f - q)
+            val c = center
+            path.reset()
+            path.moveTo(c.x - h + shift, c.y - h)
+            path.lineTo(c.x + tip + shift, c.y - h * q)
+            path.lineTo(c.x + tip + shift, c.y + h * q)
+            path.lineTo(c.x - h + shift, c.y + h)
+            path.close()
+            val mark = lerp(lerp(ink, accent, b), OnAccent, f.coerceIn(0f, 1f))
+            drawPath(path, mark)
+            drawPath(path, mark, style = Stroke(h * 0.34f, join = StrokeJoin.Round))
+        }
+    }
+}
+
+/** A spinning arc whose sweep breathes; [whole] 0..1 grows it into a closed ring; [thin] is its stroke against its size. */
+@Composable
+private fun Arc(color: Color, modifier: Modifier, thin: Float = 0.14f, whole: () -> Float) {
     val t = rememberInfiniteTransition(label = "spin")
     val turn = t.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "turn")
     val sweep = t.animateFloat(60f, 200f, infiniteRepeatable(tween(1200, easing = Motion.Standard), RepeatMode.Reverse), label = "sweep")
     Canvas(modifier.graphicsLayer { rotationZ = turn.value }) {
-        val w = size.minDimension * 0.14f
+        val w = size.minDimension * thin
         val box = Size(size.width - w, size.height - w)
         drawCircle(color.copy(alpha = 0.18f), radius = (size.minDimension - w) / 2, style = Stroke(w))
         val s = sweep.value
@@ -494,7 +561,7 @@ private fun Hero(m: AppModel, l: Loaded?) {
             }
             if (l != null) {
                 Spacer(Modifier.width(Space.S2))
-                Pill(tr("Unload", "Zwolnij"), { m.unload() }, enabled = m.loading == null, height = 36.dp)
+                LoadButton(LoadState.Loaded, {}, { m.unload() }, enabled = m.loading == null, size = 40.dp)
             }
         }
         if (l != null) {
@@ -601,10 +668,7 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
                 .padding(horizontal = Space.S4, vertical = Space.S3),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(36.dp).background(Tone.Raise, Shapes.ControlSm), contentAlignment = Alignment.Center) {
-                if (phase == Phase.Loading || phase == Phase.Landed) LoadMark(accent, { ring.value }, { fill.value }, { tick.value })
-                else ModelFace(m, p.name, p.family, 36.dp)
-            }
+            ModelFace(m, p.name, p.family, 36.dp)
             Spacer(Modifier.width(Space.S3))
             Column(Modifier.weight(1f)) {
                 BasicText(p.name, style = Type.Body.copy(fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -613,9 +677,13 @@ private fun ModelRow(m: AppModel, p: Probe, phase: Phase, modifier: Modifier = M
             AnimatedVisibility(phase == Phase.Loading && secs >= 1, enter = fadeIn(tween(Motion.M2)), exit = fadeOut(tween(Motion.M1))) {
                 Roll("$secs s", Type.Meta, Modifier.padding(start = Space.S2), digits = true)
             }
-            if (phase == Phase.Current) {
-                BasicText(tr("Loaded", "Wczytany"), Modifier.padding(start = Space.S2), style = Type.Label.copy(color = accent, fontWeight = FontWeight.SemiBold))
-            }
+            Spacer(Modifier.width(Space.S2))
+            LoadButton(
+                loadState(phase == Phase.Loading, phase == Phase.Current || phase == Phase.Landed),
+                { m.load(p) },
+                { m.unload() },
+                enabled = m.loading == null && phase != Phase.Landed,
+            )
         }
         AnimatedVisibility(
             phase == Phase.Failed && m.error != null,
@@ -638,7 +706,7 @@ private fun LoadMark(accent: Color, ring: () -> Float, fill: () -> Float, tick: 
     val part = remember { Path() }
     val measure = remember { PathMeasure() }
     Box(Modifier.size(18.dp)) {
-        Arc(accent, Modifier.matchParentSize(), ring)
+        Arc(accent, Modifier.matchParentSize(), whole = ring)
         Canvas(Modifier.matchParentSize()) {
             val f = fill()
             if (f > 0f) drawCircle(accent, alpha = f)
