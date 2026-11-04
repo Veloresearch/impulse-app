@@ -123,7 +123,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val HeadShape = Squircle(Radius.Card)
-private val Island = Squircle(22.dp)
+private val Island = androidx.compose.foundation.shape.RoundedCornerShape(percent = 50)
 
 /** The same tone as the conversation, so the band is invisible until something scrolls under it. */
 private val Band = HazeStyle(Tone.App, HazeTint(Tone.App.copy(alpha = 0.58f)), blurRadius = 20.dp, noiseFactor = 0f)

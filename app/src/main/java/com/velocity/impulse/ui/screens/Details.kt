@@ -684,13 +684,13 @@ private fun Voices(chosen: String?, onPick: (String?) -> Unit) {
                         verticalArrangement = Arrangement.Center,
                     ) {
                         BasicText(
-                            p?.face ?: "∅",
+                            p?.face ?: "🤖",
                             Modifier.graphicsLayer {
                                 scaleX = 1f + 0.18f * lift
                                 scaleY = scaleX
                                 translationY = -3.dp.toPx() * lift
                             },
-                            style = Type.Title.copy(color = if (p == null) Ink.Three else Ink.One),
+                            style = Type.Title.copy(color = Ink.One),
                         )
                         Spacer(Modifier.size(4.dp))
                         BasicText(

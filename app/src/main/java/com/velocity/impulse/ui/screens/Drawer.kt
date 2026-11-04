@@ -1,5 +1,7 @@
 package com.velocity.impulse.ui.screens
 
+import com.velocity.impulse.ui.components.IconBtn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -322,45 +324,40 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
                 .onSizeChanged { topH = it.height }
                 .cascade(shell) { 0 }
                 .statusBarsPadding()
-                .padding(8.dp)
-                .glass(haze, Shapes.Panel)
                 .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ProfileRow(m)
-            Spacer(Modifier.height(8.dp))
-            Field(query, { query = it }, tr("Search chats", "Szukaj w czatach"))
-        }
-
-        MorphSource(
-            "drawer-computer", Surface.Computer,
-            Modifier.align(Alignment.BottomCenter)
-                .onSizeChanged { bottomH = it.height }
-                .cascade(shell) { 7 }
-                .navigationBarsPadding()
-                .padding(8.dp),
-        ) {
-            val offline = m.online == false
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ProfileRow(m, haze, Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                SettingsButton(haze)
+            }
             Row(
-                Modifier.morph("drawer-computer", this, Shapes.Panel)
-                    .glass(haze, Shapes.Panel)
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .pressable({ shell.open(Surface.Computer, "drawer-computer") }, depth = 1f, feel = null)
-                    .padding(horizontal = 12.dp),
+                Modifier.fillMaxWidth().height(48.dp)
+                    .glass(haze, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Tile(if (offline) Glyph.Alert else Glyph.Link, if (offline) Signal.Err else Ink.Two, if (offline) Signal.Err.copy(alpha = 0.14f) else Tone.Raise)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    BasicText(
-                        tr("Computer", "Komputer"),
-                        Modifier.morphText("drawer-computer", this@MorphSource),
-                        style = Type.Body.copy(fontWeight = FontWeight.Medium),
-                    )
-                    BasicText(if (offline) tr("Offline", "Niedostępny") else linkLabel(m.link), style = Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                Icon(Glyph.Search, Ink.Three, size = 18.dp)
+                Spacer(Modifier.width(10.dp))
+                androidx.compose.foundation.text.BasicTextField(
+                    query, { query = it },
+                    Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = Type.Body,
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(LocalAccent.current),
+                    decorationBox = { inner ->
+                        Box {
+                            if (query.isEmpty()) BasicText(tr("Search chats", "Szukaj w czatach"), style = Type.Body.copy(color = Ink.Four))
+                            inner()
+                        }
+                    },
+                )
+                if (query.isNotEmpty()) IconBtn(Glyph.Close, { query = "" }, tint = Ink.Three, fill = Color.Transparent, size = 32.dp)
             }
         }
+
+        Box(Modifier.align(Alignment.BottomCenter).onSizeChanged { bottomH = it.height }.navigationBarsPadding())
 
         AnimatedVisibility(
             pending.isNotEmpty(),
@@ -486,33 +483,56 @@ fun Drawer(m: AppModel, modifier: Modifier = Modifier) {
     }
 }
 
+/** You and where you are connected; it opens the computer page, the gear beside it opens Settings. */
 @Composable
-private fun ProfileRow(m: AppModel) {
+private fun ProfileRow(m: AppModel, haze: HazeState, modifier: Modifier) {
     val shell = LocalShell.current
-    MorphSource("drawer-settings", Surface.Settings) {
+    MorphSource("drawer-computer", Surface.Computer, modifier) {
         val me = m.me
         val name = me?.name?.ifBlank { null } ?: "Impulse"
         val offline = m.online == false
+        val dot = when (m.online) {
+            true -> Signal.Ok
+            false -> Signal.Err
+            null -> Ink.Four
+        }
         Row(
-            Modifier.morph("drawer-settings", this, Shapes.ControlLg)
+            Modifier.morph("drawer-computer", this, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
+                .glass(haze, androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
                 .fillMaxWidth()
-                .height(60.dp)
-                .pressable({ shell.open(Surface.Settings, "drawer-settings") }, Shapes.ControlLg, Color.Transparent, Tone.Raise, depth = 1f, feel = null)
-                .padding(horizontal = 8.dp),
+                .height(56.dp)
+                .pressable({ shell.open(Surface.Computer, "drawer-computer") }, depth = 0.98f, feel = null)
+                .padding(start = 8.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Avatar(name, me?.avatar, me?.photo, 40.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                BasicText(name, style = Type.Section, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                BasicText(
-                    if (offline) tr("Computer offline", "Komputer niedostępny") else linkLabel(m.link),
-                    style = if (offline) Type.Meta.copy(color = Signal.Warn) else Type.Meta,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                BasicText(name, style = Type.Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).background(dot, CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                    BasicText(
+                        if (offline) tr("Computer offline", "Komputer niedostępny") else linkLabel(m.link),
+                        style = Type.Meta,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Icon(Glyph.Settings, Ink.Three, size = 18.dp)
+        }
+    }
+}
+
+@Composable
+private fun SettingsButton(haze: HazeState) {
+    val shell = LocalShell.current
+    MorphSource("drawer-settings", Surface.Settings) {
+        Box(
+            Modifier.morph("drawer-settings", this, CircleShape).size(56.dp).glass(haze, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            IconBtn(Glyph.Settings, { shell.open(Surface.Settings, "drawer-settings") }, tint = Ink.One, fill = Color.Transparent, size = 56.dp, island = true)
         }
     }
 }
@@ -567,7 +587,7 @@ private fun OptionLine(modifier: Modifier, glyph: Glyph, ink: Color, tile: Color
 
 @Composable
 private fun Tile(glyph: Glyph, ink: Color, fill: Color) {
-    Box(Modifier.size(32.dp).background(fill, Shapes.ControlSm), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(32.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
         Icon(glyph, ink, size = 18.dp)
     }
 }

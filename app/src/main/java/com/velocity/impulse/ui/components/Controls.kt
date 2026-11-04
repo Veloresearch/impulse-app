@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.velocity.impulse.ui.theme.Ink
@@ -154,7 +155,14 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
                 Modifier.weight(1f).fillMaxHeight().pressable({ onSelect(i) }, depth = 0.96f),
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(label, style = Type.Meta.copy(color = ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center))
+                BasicText(
+                    label,
+                    Modifier.padding(horizontal = 2.dp),
+                    style = (if (options.size >= 5) Type.Label else Type.Meta).copy(color = ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
         }
     }

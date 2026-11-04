@@ -369,7 +369,10 @@ private fun Messages(
     LaunchedEffect(items.size) {
         val added = items.size - count[0]
         count[0] = items.size
-        if (added > 0 && list.firstVisibleItemIndex == added && list.firstVisibleItemScrollOffset < near) list.scrollToItem(0)
+        if (added <= 0) return@LaunchedEffect
+        // Your own message always brings you down to it; others follow only if you were already there.
+        if (items.take(added).any { it.role == "user" }) list.animateScrollToItem(0)
+        else if (list.firstVisibleItemIndex == added && list.firstVisibleItemScrollOffset < near) list.scrollToItem(0)
     }
 
     LazyColumn(
